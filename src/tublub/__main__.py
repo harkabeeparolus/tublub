@@ -3,6 +3,7 @@
 import argparse
 import functools
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 import tablib
@@ -23,18 +24,18 @@ def main():
 
     imported_data = load_dataset(args)
     target_format = args.out_format or guess_file_format(args.outfile)
-    binary = target_format in BINARY_FORMATS
+    output_binary = target_format in BINARY_FORMATS
 
     if args.outfile:
         # Try to save to a file
         if target_format:
-            with open(args.outfile, "wb" if binary else "w") as fh:
+            with open(args.outfile, "wb" if output_binary else "w") as fh:
                 fh.write(imported_data.export(target_format))
         else:
             sys.exit(f"Unable to detect target file format for: {args.outfile}")
     elif target_format:
         # Convert data to requested target format on stdout
-        if binary and sys.stdout.isatty():
+        if output_binary and sys.stdout.isatty():
             sys.exit(f"Format {target_format} is binary, not printing to console!")
         print(imported_data.export(target_format))
     else:
@@ -57,25 +58,32 @@ def load_dataset(args):
         return imported_data
 
     input_format = guess_file_format(file_name)
-    mode = "rb" if input_format and input_format in BINARY_FORMATS else "r"
+    open_mode = "rb" if input_format and input_format in BINARY_FORMATS else "r"
+    extra_load_args = extra_input_arguments(args, input_format)
 
-    with open(file_name, mode) as fh:
-        try:
-            imported_data.load(fh, headers=args.headers)
-        except TypeError:
-            imported_data.load(fh)
+    with open(file_name, open_mode) as fh:
+        imported_data.load(fh, **extra_load_args)
 
     return imported_data
 
 
+def extra_input_arguments(args, file_format):
+    """Create and select keyword arguments for Dataset().load(),
+    filtered by input data format.
+    """
+    load_filter = defaultdict(set, {"csv": {"headers"}})
+    all_args = {"headers": args.headers}
+    return {k: v for k, v in all_args.items() if k in load_filter[file_format]}
+
+
 @functools.cache
 def get_formats():
-    """Get available Tablib formats."""
+    """Get a list of all available Tablib formats."""
     return tuple(x.title for x in tablib.formats.registry.formats())
 
 
 def parse_command_line():
-    """Parse and return arguments."""
+    """Parse and return command line arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "-l", "--list", action="store_true", help="List the available file formats."

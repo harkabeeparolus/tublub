@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Changed
 
 * Better heuristics for guessing text or binary file format.
+* Filter keyword arguments for `load()` to include only arguments that are valid
+  for the current input format.
 
 ### Removed
 
