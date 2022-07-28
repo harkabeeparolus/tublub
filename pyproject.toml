@@ -1,0 +1,36 @@
+[tool.poetry]
+authors = ["Fredrik Mellström <11281108+harkabeeparolus@users.noreply.github.com>"]
+classifiers = [
+  "Intended Audience :: Information Technology",
+  "Environment :: Console",
+  "Operating System :: OS Independent",
+  "Topic :: Text Processing",
+  "Topic :: Utilities",
+]
+description = "Convert tabular data files with Tablib."
+homepage = "https://github.com/harkabeeparolus/tublub"
+keywords = ["tablib", "csv", "tsv", "excel", "xlsx"]
+license = "MIT"
+name = "tublub"
+readme = "README.md"
+version = "0.1.0"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+tablib = {extras = ["all"], version = "^3.2.1"}
+
+[tool.poetry.dev-dependencies]
+pytest = "^5.2"
+
+[build-system]
+build-backend = "poetry.core.masonry.api"
+requires = ["poetry-core>=1.0.0"]
+
+[tool.poetry.scripts]
+tublub = 'tublub.__main__:main'
+
+[tool.black]
+target-version = ['py38']
+
+[tool.isort]
+profile = "black"
