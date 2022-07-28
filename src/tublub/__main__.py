@@ -22,7 +22,7 @@ def main():
         sys.exit()
 
     imported_data = load_dataset(args)
-    target_format = detect_target_format(args)
+    target_format = args.out_format or guess_file_format(args.outfile)
     binary = target_format in BINARY_FORMATS
 
     if args.outfile:
@@ -42,30 +42,29 @@ def main():
         print(imported_data)
 
 
-def detect_target_format(args):
-    """Get target format from arguments or target file name."""
-    target_format = args.out_format
-    if args.outfile and not target_format:
-        if (suf := Path(args.outfile).suffix.lstrip(".")) and suf in get_formats():
-            target_format = suf
-    return target_format
+def guess_file_format(filename=None):
+    """Guess format from file name."""
+    if filename:
+        if (suf := Path(filename).suffix.lstrip(".")) and suf in get_formats():
+            return suf
+    return None
 
 
 def load_dataset(args):
     """Load a file into a Tablib dataset."""
     imported_data = Dataset()
-    if args.infile:
-        try_binary = False
-        with open(args.infile, "r") as fh:
-            try:
-                imported_data.load(fh, headers=args.headers)
-            except TypeError:
-                imported_data.load(fh)
-            except UnicodeDecodeError:
-                try_binary = True
-        if try_binary:
-            with open(args.infile, "rb") as fh:
-                imported_data.load(fh)
+    if not (file_name := args.infile):
+        return imported_data
+
+    input_format = guess_file_format(file_name)
+    mode = "rb" if input_format and input_format in BINARY_FORMATS else "r"
+
+    with open(file_name, mode) as fh:
+        try:
+            imported_data.load(fh, headers=args.headers)
+        except TypeError:
+            imported_data.load(fh)
+
     return imported_data
 
 
