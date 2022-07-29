@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
+* Warn and exit on empty input.
+
 ### Changed
 
 * Better heuristics for guessing text or binary file format.

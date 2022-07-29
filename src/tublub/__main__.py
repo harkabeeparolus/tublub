@@ -1,4 +1,8 @@
-"""Convert tabular information files between different formats using Tablib."""
+"""Convert tabular information files between different formats using Tablib.
+
+If no outfile is specified the result will be printed instead, either in the
+requested format, or pretty-printed as a table.
+"""
 
 import argparse
 import functools
@@ -8,7 +12,6 @@ from pathlib import Path
 
 import tablib
 import tablib.formats
-from tablib import Dataset
 
 # https://tablib.readthedocs.io/en/stable/formats.html
 BINARY_FORMATS = {"xlsx", "xls", "dbf", "ods"}
@@ -20,27 +23,19 @@ def main():
 
     if args.list:
         print("Available formats:", " ".join(get_formats()))
-        sys.exit()
+        return
 
-    imported_data = load_dataset(args)
-    target_format = args.out_format or guess_file_format(args.outfile)
-    output_binary = target_format in BINARY_FORMATS
+    my_data = load_dataset_file(args.infile, extra_args=args)
+    if not my_data:
+        sys.exit(f"No data was loaded from {args.infile}, exiting...")
 
     if args.outfile:
-        # Try to save to a file
-        if target_format:
-            with open(args.outfile, "wb" if output_binary else "w") as fh:
-                fh.write(imported_data.export(target_format))
-        else:
-            sys.exit(f"Unable to detect target file format for: {args.outfile}")
-    elif target_format:
-        # Convert data to requested target format on stdout
-        if output_binary and sys.stdout.isatty():
-            sys.exit(f"Format {target_format} is binary, not printing to console!")
-        print(imported_data.export(target_format))
+        save_dataset_file(my_data, file_name=args.outfile, force_format=args.out_format)
+        print(f"Saved {args.outfile} -- {len(my_data)} rows.")
+    elif args.out_format:
+        export_dataset(my_data, args.out_format)
     else:
-        # Just print the tablib Dataset directly to stdout
-        print(imported_data)
+        print(my_data)
 
 
 def guess_file_format(filename=None):
@@ -51,20 +46,37 @@ def guess_file_format(filename=None):
     return None
 
 
-def load_dataset(args):
+def load_dataset_file(file_name, extra_args):
     """Load a file into a Tablib dataset."""
-    imported_data = Dataset()
-    if not (file_name := args.infile):
-        return imported_data
-
     input_format = guess_file_format(file_name)
     open_mode = "rb" if input_format and input_format in BINARY_FORMATS else "r"
-    extra_load_args = extra_input_arguments(args, input_format)
+    extra_load_args = extra_input_arguments(extra_args, input_format)
 
     with open(file_name, open_mode) as fh:
-        imported_data.load(fh, **extra_load_args)
+        imported_data = tablib.import_set(fh, **extra_load_args)
 
     return imported_data
+
+
+def save_dataset_file(data, file_name, force_format=None):
+    """Save a Tablib dataset to a file."""
+    file_format = force_format or guess_file_format(file_name)
+    if not file_format:
+        sys.exit(f"Unable to detect target file format for: {file_name}")
+
+    open_binary = file_format in BINARY_FORMATS
+    with open(file_name, "wb" if open_binary else "w") as fh:
+        # fh.write(data.export(file_format))
+        export_dataset(data, file_format, file_handle=fh)
+
+
+def export_dataset(data, target_format, file_handle=sys.stdout):
+    """Export dataset to a file handle or other stream."""
+    bin_mode = target_format in BINARY_FORMATS
+    if bin_mode and file_handle is sys.stdout and sys.stdout.isatty():
+        sys.exit(f"Format {target_format} is binary, not printing to console!")
+
+    file_handle.write(data.export(target_format))
 
 
 def extra_input_arguments(args, file_format):
@@ -95,7 +107,11 @@ def parse_command_line():
         help="Use this option when your CSV/TSV input data has no header row.",
     )
     parser.add_argument(
-        "-t", "--format", metavar="F", dest="out_format", help="Specify output format."
+        "-t",
+        "--format",
+        metavar="FORMAT",
+        dest="out_format",
+        help="Specify output format. Default: File extension from outfile, if provided.",
     )
     parser.add_argument("infile", nargs="?", help="input (source) file")
     parser.add_argument("outfile", nargs="?", help="output (destination) file")
@@ -103,6 +119,9 @@ def parse_command_line():
 
     if args.list and (args.infile or args.outfile):
         parser.error("Can not combine --list with filename(s)")
+
+    if not args.list and not args.infile:
+        parser.error("No input data provided.")
 
     if args.out_format and args.out_format not in get_formats():
         parser.error(f"Invalid format {args.out_format}, use one of: {get_formats()}")
