@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
-* Warn and exit on empty input.
+* Warn and exit on empty input or missing input file.
 
 ### Changed
 
