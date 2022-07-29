@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Changed
 
 * Added *headers* for TSV format as well as CSV.
+* Improved console handling for printing to stdout.
 
 ### Removed
 

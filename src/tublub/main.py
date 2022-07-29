@@ -85,10 +85,13 @@ def save_dataset_file(data, file_name, force_format=None):
 
 def export_dataset(data, target_format, file_handle=sys.stdout):
     """Export dataset to a file handle or other stream."""
-    if is_bin(target_format) and file_handle is sys.stdout and sys.stdout.isatty():
-        sys.exit(f"Format {target_format} is binary, not printing to console!")
-
-    file_handle.write(data.export(target_format))
+    output = data.export(target_format)
+    if file_handle is sys.stdout and sys.stdout.isatty():
+        if is_bin(target_format):
+            sys.exit(f"Format {target_format} is binary, not printing to console!")
+        print(output)
+        return
+    file_handle.write(output)
 
 
 def extra_input_arguments(args, file_format):
