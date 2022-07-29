@@ -13,11 +13,13 @@ from pathlib import Path
 import tablib
 import tablib.formats
 
+from tublub import __version__
+
 # https://tablib.readthedocs.io/en/stable/formats.html
 BINARY_FORMATS = {"xlsx", "xls", "dbf", "ods"}
 
 
-def main():
+def cli():
     """Run the command line interface."""
     args = parse_command_line()
 
@@ -100,7 +102,13 @@ def parse_command_line():
     """Parse and return command line arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "-l", "--list", action="store_true", help="List the available file formats."
+        "-V", "--version", action="version", version=f"%(prog)s {__version__}"
+    )
+    parser.add_argument(
+        "-l",
+        "--list",
+        action="store_true",
+        help="List the available file formats and exit.",
     )
     parser.add_argument(
         "--no-headers",
@@ -135,4 +143,4 @@ def parse_command_line():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(cli())

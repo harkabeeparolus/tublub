@@ -13,7 +13,7 @@ keywords = ["tablib", "csv", "tsv", "excel", "xlsx"]
 license = "MIT"
 name = "tublub"
 readme = "README.md"
-version = "0.1.0"
+version = "0.2.0"
 
 [tool.poetry.dependencies]
 python = "^3.8"
@@ -27,7 +27,7 @@ build-backend = "poetry.core.masonry.api"
 requires = ["poetry-core>=1.0.0"]
 
 [tool.poetry.scripts]
-tublub = 'tublub.__main__:main'
+tublub = 'tublub.main:cli'
 
 [tool.black]
 target-version = ['py38']

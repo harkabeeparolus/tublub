@@ -9,15 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
+### Changed
+
+### Removed
+
+## [0.2.0] - 2022-07-29
+
+### Added
+
 * Warn and exit on empty input or missing input file.
+* Added `--version` flag.
 
 ### Changed
 
 * Better heuristics for guessing text or binary file format.
 * Filter keyword arguments for `load()` to include only arguments that are valid
   for the current input format.
-
-### Removed
 
 ## [0.1.0] - 2022-07-28
 
