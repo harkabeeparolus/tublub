@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Removed
 
+* Pandas is no longer included, since DataFrames is not a file format.
+
 ## [0.2.0] - 2022-07-29
 
 ### Added
