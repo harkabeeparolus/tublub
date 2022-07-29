@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
+* Extra format detection with Tablib before loading file.
+
 ### Changed
 
 * Added *headers* for TSV format as well as CSV.

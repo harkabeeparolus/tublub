@@ -52,10 +52,20 @@ def guess_file_format(filename=None):
 
 def load_dataset_file(file_name, extra_args):
     """Load a file into a Tablib dataset."""
-    input_format = guess_file_format(file_name)
-    extra_load_args = extra_input_arguments(extra_args, input_format)
+    guess_format = guess_file_format(file_name)
+    open_mode = "rb" if is_bin(guess_format) else "r"
 
-    with open(file_name, "rb" if is_bin(input_format) else "r") as fh:
+    detect_format = None
+    with open(file_name, open_mode) as fh:
+        detect_format = tablib.detect_format(fh)
+    if guess_format and guess_format != detect_format:
+        print(
+            f"Guessed mode {guess_format} differs from Tablib detected {detect_format}",
+            file=sys.stderr,
+        )
+
+    extra_load_args = extra_input_arguments(extra_args, detect_format)
+    with open(file_name, open_mode) as fh:
         imported_data = tablib.import_set(fh, **extra_load_args)
 
     return imported_data
