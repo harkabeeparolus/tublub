@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.0] - 2022-07-29
+
 ### Added
 
 * Extra format detection with Tablib before loading file.
@@ -19,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Removed
 
 * Pandas is no longer included, since DataFrames is not a file format.
+  It also reduces the installation size on disk.
 
 ## [0.2.0] - 2022-07-29
 

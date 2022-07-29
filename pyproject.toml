@@ -13,7 +13,7 @@ keywords = ["tablib", "csv", "tsv", "excel", "xlsx"]
 license = "MIT"
 name = "tublub"
 readme = "README.md"
-version = "0.2.0"
+version = "0.3.0"
 
 [tool.poetry.dependencies]
 python = "^3.8"
