@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Changed
 
+* Added *headers* for TSV format as well as CSV.
+
 ### Removed
 
 ## [0.2.0] - 2022-07-29

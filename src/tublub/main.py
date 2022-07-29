@@ -4,6 +4,8 @@ If no outfile is specified the result will be printed instead, either in the
 requested format, or pretty-printed as a table.
 """
 
+# TODO: Handle pipelines.
+
 import argparse
 import functools
 import sys
@@ -17,6 +19,7 @@ from tublub import __version__
 
 # https://tablib.readthedocs.io/en/stable/formats.html
 BINARY_FORMATS = {"xlsx", "xls", "dbf", "ods"}
+LOAD_EXTRA_ARGS = {"csv": {"headers"}, "tsv": {"headers"}}
 
 
 def cli():
@@ -82,7 +85,7 @@ def extra_input_arguments(args, file_format):
     """Create and select keyword arguments for Dataset().load(),
     filtered by input data format.
     """
-    load_filter = defaultdict(set, {"csv": {"headers"}})
+    load_filter = defaultdict(set, LOAD_EXTRA_ARGS)
     all_args = {"headers": args.headers}
     return {k: v for k, v in all_args.items() if k in load_filter[file_format]}
 
