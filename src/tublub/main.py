@@ -11,6 +11,7 @@ import argparse
 import functools
 import sys
 from collections import defaultdict
+from operator import or_
 from pathlib import Path
 
 import tablib
@@ -32,13 +33,13 @@ OPEN_EXTRA_ARGS = {"csv": {"newline": ""}}
 
 def cli():
     """Run the command line interface."""
-    args = parse_command_line()
+    args, extra_args = parse_command_line()
 
     if args.list:
         print("Available formats:", " ".join(get_formats()))
         return
 
-    my_data = load_dataset_file(args.infile, extra_args=args)
+    my_data = load_dataset_file(args.infile, extra_args=extra_args)
     if not my_data:
         sys.exit(f"No data was loaded from {args.infile}, exiting...")
 
@@ -47,10 +48,10 @@ def cli():
             my_data,
             file_name=args.outfile,
             force_format=args.out_format,
-            extra_args=args,
+            extra_args=extra_args,
         )
     elif args.out_format:
-        export_dataset(my_data, args.out_format, extra_args=args)
+        export_dataset(my_data, args.out_format, extra_args=extra_args)
     else:
         print(my_data)
 
@@ -78,7 +79,8 @@ def load_dataset_file(file_name, extra_args):
 
     open_mode = "rb" if is_bin(detect_format) else "r"
     open_extra = OPEN_EXTRA_ARGS.get(detect_format, {})
-    extra_load_args = extra_input_arguments(extra_args, detect_format)
+    # extra_load_args = extra_input_arguments(extra_args, detect_format)
+    extra_load_args = filter_args(LOAD_EXTRA_ARGS, extra_args, detect_format)
 
     with open(file_name, open_mode, **open_extra) as fh:
         imported_data = tablib.import_set(fh, **extra_load_args)
@@ -102,7 +104,8 @@ def save_dataset_file(data, file_name, extra_args, force_format=None):
 
 def export_dataset(data, target_format, extra_args, file_handle=sys.stdout):
     """Export dataset to a file handle or other stream."""
-    extra_save_args = extra_output_arguments(extra_args, target_format)
+    # extra_save_args = extra_output_arguments(extra_args, target_format)
+    extra_save_args = filter_args(SAVE_EXTRA_ARGS, extra_args, target_format)
     output = data.export(target_format, **extra_save_args)
 
     if file_handle is sys.stdout and sys.stdout.isatty():
@@ -113,29 +116,15 @@ def export_dataset(data, target_format, extra_args, file_handle=sys.stdout):
     file_handle.write(output)
 
 
-def extra_input_arguments(args, file_format):
+def filter_args(args_by_format, user_args, file_format):
     """Create and select keyword arguments for Dataset().load(),
     filtered by input data format.
     """
-    load_filter = defaultdict(set, LOAD_EXTRA_ARGS)
-    all_args = {"headers": args.headers}
+    load_filter = defaultdict(set, args_by_format)
     return {
         k: v
-        for k, v in all_args.items()
+        for k, v in user_args.items()
         if k in load_filter[file_format] and v is not None
-    }
-
-
-def extra_output_arguments(args, file_format):
-    """Create and select keyword arguments for Dataset().export(),
-    filtered by output data format.
-    """
-    save_filter = defaultdict(set, SAVE_EXTRA_ARGS)
-    all_args = {"tablefmt": args.table_format}
-    return {
-        k: v
-        for k, v in all_args.items()
-        if k in save_filter[file_format] and v is not None
     }
 
 
@@ -182,6 +171,7 @@ def parse_command_line():
     output_group.add_argument(
         "--table-format",
         metavar="FMT",
+        dest="tablefmt",
         help="For the 'cli' format, choose a table format supported by Tabulate, "
         "e.g. 'fancy_grid'.",
     )
@@ -189,6 +179,8 @@ def parse_command_line():
     parser.add_argument("infile", nargs="?", help="input (source) file")
     parser.add_argument("outfile", nargs="?", help="output (destination) file")
     args = parser.parse_args()
+
+    # Sanity checking
 
     if args.list and (args.infile or args.outfile):
         parser.error("Can not combine --list with filename(s)")
@@ -202,7 +194,17 @@ def parse_command_line():
     if args.out_format and args.out_format not in get_formats():
         parser.error(f"Invalid format {args.out_format}, use one of: {get_formats()}")
 
-    return args
+    # Make a dict of all args.xxx for xxx in the EXTRA_ARGS structures
+    all_extra_args = functools.reduce(
+        or_, {**LOAD_EXTRA_ARGS, **SAVE_EXTRA_ARGS}.values()
+    )
+    extra_args = {
+        key: value
+        for key in all_extra_args
+        if (value := getattr(args, key, None)) is not None
+    }
+
+    return args, extra_args
 
 
 if __name__ == "__main__":
