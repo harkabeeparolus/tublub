@@ -5,6 +5,7 @@ requested format, or pretty-printed as a table.
 """
 
 # TODO: Handle pipelines.
+# TODO: Multiple input files to single XLSX Databook output
 
 import argparse
 import functools
@@ -19,7 +20,14 @@ from tublub import __version__
 
 # https://tablib.readthedocs.io/en/stable/formats.html
 BINARY_FORMATS = {"xlsx", "xls", "dbf", "ods"}
-LOAD_EXTRA_ARGS = {"csv": {"headers"}, "tsv": {"headers"}}
+LOAD_EXTRA_ARGS = {
+    "csv": {"headers", "delimiter", "quotechar", "dialect"},
+    "tsv": {"headers", "delimiter", "quotechar", "dialect"},
+    "xls": {"skip_lines"},
+    "xlsx": {"skip_lines", "read_only"},
+}
+SAVE_EXTRA_ARGS = {"cli": {"tablefmt"}, "csv": {"delimiter", "quotechar", "dialect"}}
+OPEN_EXTRA_ARGS = {"csv": {"newline": ""}}
 
 
 def cli():
@@ -35,9 +43,14 @@ def cli():
         sys.exit(f"No data was loaded from {args.infile}, exiting...")
 
     if args.outfile:
-        save_dataset_file(my_data, file_name=args.outfile, force_format=args.out_format)
+        save_dataset_file(
+            my_data,
+            file_name=args.outfile,
+            force_format=args.out_format,
+            extra_args=args,
+        )
     elif args.out_format:
-        export_dataset(my_data, args.out_format)
+        export_dataset(my_data, args.out_format, extra_args=args)
     else:
         print(my_data)
 
@@ -53,10 +66,9 @@ def guess_file_format(filename=None):
 def load_dataset_file(file_name, extra_args):
     """Load a file into a Tablib dataset."""
     guess_format = guess_file_format(file_name)
-    open_mode = "rb" if is_bin(guess_format) else "r"
 
     detect_format = None
-    with open(file_name, open_mode) as fh:
+    with open(file_name, "rb" if is_bin(guess_format) else "r") as fh:
         detect_format = tablib.detect_format(fh)
     if guess_format and guess_format != detect_format:
         print(
@@ -64,28 +76,35 @@ def load_dataset_file(file_name, extra_args):
             file=sys.stderr,
         )
 
+    open_mode = "rb" if is_bin(detect_format) else "r"
+    open_extra = OPEN_EXTRA_ARGS.get(detect_format, {})
     extra_load_args = extra_input_arguments(extra_args, detect_format)
-    with open(file_name, open_mode) as fh:
+
+    with open(file_name, open_mode, **open_extra) as fh:
         imported_data = tablib.import_set(fh, **extra_load_args)
 
     return imported_data
 
 
-def save_dataset_file(data, file_name, force_format=None):
+def save_dataset_file(data, file_name, extra_args, force_format=None):
     """Save a Tablib dataset to a file."""
     file_format = force_format or guess_file_format(file_name)
     if not file_format:
         sys.exit(f"Unable to detect target file format for: {file_name}")
 
-    with open(file_name, "wb" if is_bin(file_format) else "w") as fh:
+    open_extra = OPEN_EXTRA_ARGS.get(file_format, {})
+    with open(file_name, "wb" if is_bin(file_format) else "w", **open_extra) as fh:
         # fh.write(data.export(file_format))
-        export_dataset(data, file_format, file_handle=fh)
+        export_dataset(data, file_format, extra_args, file_handle=fh)
+
     print(f"Saved '{file_name}', {len(data)} records ({file_format})")
 
 
-def export_dataset(data, target_format, file_handle=sys.stdout):
+def export_dataset(data, target_format, extra_args, file_handle=sys.stdout):
     """Export dataset to a file handle or other stream."""
-    output = data.export(target_format)
+    extra_save_args = extra_output_arguments(extra_args, target_format)
+    output = data.export(target_format, **extra_save_args)
+
     if file_handle is sys.stdout and sys.stdout.isatty():
         if is_bin(target_format):
             sys.exit(f"Format {target_format} is binary, not printing to console!")
@@ -100,7 +119,24 @@ def extra_input_arguments(args, file_format):
     """
     load_filter = defaultdict(set, LOAD_EXTRA_ARGS)
     all_args = {"headers": args.headers}
-    return {k: v for k, v in all_args.items() if k in load_filter[file_format]}
+    return {
+        k: v
+        for k, v in all_args.items()
+        if k in load_filter[file_format] and v is not None
+    }
+
+
+def extra_output_arguments(args, file_format):
+    """Create and select keyword arguments for Dataset().export(),
+    filtered by output data format.
+    """
+    save_filter = defaultdict(set, SAVE_EXTRA_ARGS)
+    all_args = {"tablefmt": args.table_format}
+    return {
+        k: v
+        for k, v in all_args.items()
+        if k in save_filter[file_format] and v is not None
+    }
 
 
 @functools.cache
@@ -126,19 +162,30 @@ def parse_command_line():
         action="store_true",
         help="List the available file formats and exit.",
     )
-    parser.add_argument(
+
+    input_group = parser.add_argument_group(title="input options")
+    input_group.add_argument(
         "--no-headers",
         dest="headers",
         action="store_false",
         help="Use this option when your CSV/TSV input data has no header row.",
     )
-    parser.add_argument(
+
+    output_group = parser.add_argument_group(title="output options")
+    output_group.add_argument(
         "-t",
         "--format",
         metavar="FORMAT",
         dest="out_format",
         help="Specify output format. Default: File extension from outfile, if provided.",
     )
+    output_group.add_argument(
+        "--table-format",
+        metavar="FMT",
+        help="For the 'cli' format, choose a table format supported by Tabulate, "
+        "e.g. 'fancy_grid'.",
+    )
+
     parser.add_argument("infile", nargs="?", help="input (source) file")
     parser.add_argument("outfile", nargs="?", help="output (destination) file")
     args = parser.parse_args()

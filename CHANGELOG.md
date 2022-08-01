@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+* Extra options for exporting Excel, CSV, TSV, and CLI formats.
+
+### Changed
+
+* Correct handling of `open(..., newline="")` for reading and writing CSV files.
 
 ## [0.3.0] - 2022-07-29
 
