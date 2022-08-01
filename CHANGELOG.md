@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
-* Extra options for exporting Excel, CSV, TSV, and CLI formats.
+* All extra format options for importing and exporting Excel, CSV, TSV, and CLI.
 
 ### Changed
 

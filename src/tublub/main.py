@@ -8,6 +8,7 @@ requested format, or pretty-printed as a table.
 # TODO: Multiple input files to single XLSX Databook output
 
 import argparse
+import csv
 import functools
 import sys
 from collections import defaultdict
@@ -22,8 +23,8 @@ from tublub import __version__
 # https://tablib.readthedocs.io/en/stable/formats.html
 BINARY_FORMATS = {"xlsx", "xls", "dbf", "ods"}
 LOAD_EXTRA_ARGS = {
-    "csv": {"headers", "delimiter", "quotechar", "dialect"},
-    "tsv": {"headers", "delimiter", "quotechar", "dialect"},
+    "csv": {"skip_lines", "headers", "delimiter", "quotechar", "dialect"},
+    "tsv": {"skip_lines", "headers"},
     "xls": {"skip_lines"},
     "xlsx": {"skip_lines", "read_only"},
 }
@@ -139,7 +140,7 @@ def is_bin(data_format):
     return bool(data_format and data_format in BINARY_FORMATS)
 
 
-def parse_command_line():
+def build_argument_parser():
     """Parse and return command line arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -151,6 +152,17 @@ def parse_command_line():
         action="store_true",
         help="List the available file formats and exit.",
     )
+    parser.add_argument(
+        "--dialect",
+        choices=csv.list_dialects(),
+        help="For CSV, input/output CSV dialect.",
+    )
+    parser.add_argument(
+        "--delimiter", metavar="D", help="For CSV, input/output delimiter."
+    )
+    parser.add_argument(
+        "--quotechar", metavar="C", help="For CSV, input/output quote char."
+    )
 
     input_group = parser.add_argument_group(title="input options")
     input_group.add_argument(
@@ -159,25 +171,43 @@ def parse_command_line():
         action="store_false",
         help="Use this option when your CSV/TSV input data has no header row.",
     )
+    input_group.add_argument(
+        "--skip-lines",
+        type=int,
+        metavar="LINES",
+        help="For CSV/TSV/XLS/XLSX input, skip lines at the top of the file.",
+    )
+    input_group.add_argument(
+        "--no-xlsx-lazy",
+        dest="read_only",
+        action="store_false",
+        help="Disable optimized ('read_only') loading of XLSX files. "
+        "Needed if the file is slightly broken, e.g. has incorrect dimensions.",
+    )
 
     output_group = parser.add_argument_group(title="output options")
     output_group.add_argument(
         "-t",
         "--format",
-        metavar="FORMAT",
+        metavar="FMT",
         dest="out_format",
         help="Specify output format. Default: File extension from outfile, if provided.",
     )
     output_group.add_argument(
-        "--table-format",
-        metavar="FMT",
-        dest="tablefmt",
-        help="For the 'cli' format, choose a table format supported by Tabulate, "
+        "--tablefmt",
+        help="For 'cli' output, choose a table format supported by Tabulate, "
         "e.g. 'fancy_grid'.",
     )
 
     parser.add_argument("infile", nargs="?", help="input (source) file")
     parser.add_argument("outfile", nargs="?", help="output (destination) file")
+
+    return parser
+
+
+def parse_command_line():
+    """Parse and return input arguments."""
+    parser = build_argument_parser()
     args = parser.parse_args()
 
     # Sanity checking
