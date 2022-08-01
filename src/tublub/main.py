@@ -1,7 +1,7 @@
 """Convert tabular information files between different formats using Tablib.
 
-If no outfile is specified the result will be printed instead, either in the
-requested format, or pretty-printed as a table.
+If no outfile is specified the result will be printed to STDOUT instead,
+either in the requested output format, or pretty-printed as a table.
 """
 
 # TODO: Handle pipelines.
@@ -150,39 +150,40 @@ def build_argument_parser():
         "-l",
         "--list",
         action="store_true",
-        help="List the available file formats and exit.",
+        help="list the available file formats and exit",
     )
     parser.add_argument(
         "--dialect",
+        metavar="DIALECT",
         choices=csv.list_dialects(),
-        help="For CSV, input/output CSV dialect.",
+        help="for CSV, input/output dialect {excel, unix}",
     )
     parser.add_argument(
-        "--delimiter", metavar="D", help="For CSV, input/output delimiter."
+        "-d", "--delimiter", metavar="C", help="for CSV, input/output delimiter"
     )
     parser.add_argument(
-        "--quotechar", metavar="C", help="For CSV, input/output quote char."
+        "-q", "--quotechar", metavar="C", help="for CSV, input/output quote char"
     )
 
     input_group = parser.add_argument_group(title="input options")
     input_group.add_argument(
+        "-H",
         "--no-headers",
         dest="headers",
         action="store_false",
-        help="Use this option when your CSV/TSV input data has no header row.",
+        help="CSV/TSV input data has no header row",
     )
     input_group.add_argument(
         "--skip-lines",
         type=int,
         metavar="LINES",
-        help="For CSV/TSV/XLS/XLSX input, skip lines at the top of the file.",
+        help="for CSV/TSV/XLS/XLSX input, skip lines at the top",
     )
     input_group.add_argument(
-        "--no-xlsx-lazy",
+        "--no-xlsx-optimize",
         dest="read_only",
         action="store_false",
-        help="Disable optimized ('read_only') loading of XLSX files. "
-        "Needed if the file is slightly broken, e.g. has incorrect dimensions.",
+        help="disable optimized ('read_only') loading of XLSX files",
     )
 
     output_group = parser.add_argument_group(title="output options")
@@ -191,12 +192,11 @@ def build_argument_parser():
         "--format",
         metavar="FMT",
         dest="out_format",
-        help="Specify output format. Default: File extension from outfile, if provided.",
+        help="output format (default: outfile extension, or none)",
     )
     output_group.add_argument(
         "--tablefmt",
-        help="For 'cli' output, choose a table format supported by Tabulate, "
-        "e.g. 'fancy_grid'.",
+        help="CLI output; Tabulate table format, e.g. 'fancy_grid'",
     )
 
     parser.add_argument("infile", nargs="?", help="input (source) file")
