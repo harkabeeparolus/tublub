@@ -80,7 +80,6 @@ def load_dataset_file(file_name, extra_args):
 
     open_mode = "rb" if is_bin(detect_format) else "r"
     open_extra = OPEN_EXTRA_ARGS.get(detect_format, {})
-    # extra_load_args = extra_input_arguments(extra_args, detect_format)
     extra_load_args = filter_args(LOAD_EXTRA_ARGS, extra_args, detect_format)
 
     with open(file_name, open_mode, **open_extra) as fh:
@@ -97,7 +96,6 @@ def save_dataset_file(data, file_name, extra_args, force_format=None):
 
     open_extra = OPEN_EXTRA_ARGS.get(file_format, {})
     with open(file_name, "wb" if is_bin(file_format) else "w", **open_extra) as fh:
-        # fh.write(data.export(file_format))
         export_dataset(data, file_format, extra_args, file_handle=fh)
 
     print(f"Saved '{file_name}', {len(data)} records ({file_format})")
@@ -105,7 +103,6 @@ def save_dataset_file(data, file_name, extra_args, force_format=None):
 
 def export_dataset(data, target_format, extra_args, file_handle=sys.stdout):
     """Export dataset to a file handle or other stream."""
-    # extra_save_args = extra_output_arguments(extra_args, target_format)
     extra_save_args = filter_args(SAVE_EXTRA_ARGS, extra_args, target_format)
     output = data.export(target_format, **extra_save_args)
 
@@ -138,6 +135,38 @@ def get_formats():
 def is_bin(data_format):
     """Return true if data format is binary."""
     return bool(data_format and data_format in BINARY_FORMATS)
+
+
+def parse_command_line():
+    """Parse and return input arguments."""
+    parser = build_argument_parser()
+    args = parser.parse_args()
+
+    # Sanity checking
+
+    if args.list and (args.infile or args.outfile):
+        parser.error("Can not combine --list with filename(s)")
+
+    if not args.list and not args.infile:
+        parser.error("No input data provided.")
+
+    if args.infile and not Path(args.infile).is_file():
+        parser.error(f"Input file {args.infile} does not exist.")
+
+    if args.out_format and args.out_format not in get_formats():
+        parser.error(f"Invalid format {args.out_format}, use one of: {get_formats()}")
+
+    # Make a dict of all args.xxx for xxx in the EXTRA_ARGS structures
+    all_extra_args = functools.reduce(
+        or_, {**LOAD_EXTRA_ARGS, **SAVE_EXTRA_ARGS}.values()
+    )
+    extra_args = {
+        key: value
+        for key in all_extra_args
+        if (value := getattr(args, key, None)) is not None
+    }
+
+    return args, extra_args
 
 
 def build_argument_parser():
@@ -203,38 +232,6 @@ def build_argument_parser():
     parser.add_argument("outfile", nargs="?", help="output (destination) file")
 
     return parser
-
-
-def parse_command_line():
-    """Parse and return input arguments."""
-    parser = build_argument_parser()
-    args = parser.parse_args()
-
-    # Sanity checking
-
-    if args.list and (args.infile or args.outfile):
-        parser.error("Can not combine --list with filename(s)")
-
-    if not args.list and not args.infile:
-        parser.error("No input data provided.")
-
-    if args.infile and not Path(args.infile).is_file():
-        parser.error(f"Input file {args.infile} does not exist.")
-
-    if args.out_format and args.out_format not in get_formats():
-        parser.error(f"Invalid format {args.out_format}, use one of: {get_formats()}")
-
-    # Make a dict of all args.xxx for xxx in the EXTRA_ARGS structures
-    all_extra_args = functools.reduce(
-        or_, {**LOAD_EXTRA_ARGS, **SAVE_EXTRA_ARGS}.values()
-    )
-    extra_args = {
-        key: value
-        for key in all_extra_args
-        if (value := getattr(args, key, None)) is not None
-    }
-
-    return args, extra_args
 
 
 if __name__ == "__main__":
