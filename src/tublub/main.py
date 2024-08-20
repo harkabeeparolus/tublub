@@ -16,6 +16,7 @@ from operator import or_
 from pathlib import Path
 
 import tablib
+import tablib.exceptions
 import tablib.formats
 
 from tublub import __version__
@@ -77,13 +78,15 @@ def load_dataset_file(file_name, extra_args):
             f"Guessed mode {guess_format} differs from Tablib detected {detect_format}",
             file=sys.stderr,
         )
+    if detect_format is None:
+        detect_format = guess_format
 
     open_mode = "rb" if is_bin(detect_format) else "r"
     open_extra = OPEN_EXTRA_ARGS.get(detect_format, {})
     extra_load_args = filter_args(LOAD_EXTRA_ARGS, extra_args, detect_format)
 
     with open(file_name, open_mode, **open_extra) as fh:
-        imported_data = tablib.import_set(fh, **extra_load_args)
+        imported_data = tablib.import_set(fh, format=detect_format, **extra_load_args)
 
     return imported_data
 
