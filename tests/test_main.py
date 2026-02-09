@@ -9,6 +9,7 @@ from tublub.main import (
     BINARY_FORMATS,
     LOAD_EXTRA_ARGS,
     SAVE_EXTRA_ARGS,
+    TublubError,
     build_argument_parser,
     export_dataset,
     filter_args,
@@ -158,6 +159,12 @@ class TestLoadDatasetFile:
         assert len(ds) == 1
         assert ds.headers == ["name", "age"]
 
+    def test_load_unknown_format_raises(self, tmp_path):
+        p = tmp_path / "data.xyz"
+        p.write_text("not a known format")
+        with pytest.raises(TublubError, match="Unable to detect"):
+            load_dataset_file(p, extra_args={})
+
 
 # --- save_dataset_file ---
 
@@ -182,9 +189,9 @@ class TestSaveDatasetFile:
         content = out.read_text()
         assert "Alice" in content
 
-    def test_save_unknown_format_exits(self, sample_data, tmp_path):
+    def test_save_unknown_format_raises(self, sample_data, tmp_path):
         out = tmp_path / "out.xyz"
-        with pytest.raises(SystemExit):
+        with pytest.raises(TublubError, match="Unable to detect"):
             save_dataset_file(sample_data, out, extra_args={})
 
     def test_roundtrip_csv(self, sample_data, tmp_path):
@@ -206,9 +213,9 @@ class TestExportDataset:
         content = out.read_text()
         assert "Alice" in content
 
-    def test_export_binary_to_tty_exits(self, sample_data, monkeypatch):
+    def test_export_binary_to_tty_raises(self, sample_data, monkeypatch):
         monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-        with pytest.raises(SystemExit, match="binary"):
+        with pytest.raises(TublubError, match="binary"):
             export_dataset(sample_data, "xlsx", extra_args={})
 
     def test_export_text_to_non_tty(self, sample_data, tmp_path):

@@ -20,6 +20,11 @@ import tablib.formats
 
 from tublub import __version__
 
+
+class TublubError(ValueError):
+    """Raised for tublub-specific errors (bad format, empty data, etc.)."""
+
+
 # https://tablib.readthedocs.io/en/stable/formats.html
 BINARY_FORMATS = {"xlsx", "xls", "dbf", "ods"}
 LOAD_EXTRA_ARGS = {
@@ -40,21 +45,27 @@ def cli() -> int:
         print("Available formats:", " ".join(get_formats()))
         return 0
 
-    my_data = load_dataset_file(args.infile, extra_args=extra_args)
+    try:
+        my_data = load_dataset_file(args.infile, extra_args=extra_args)
+    except TublubError as exc:
+        sys.exit(str(exc))
     if not my_data:
-        sys.exit(f"No data was loaded from {args.infile}, exiting...")
+        sys.exit(f"No data was loaded from {args.infile}")
 
-    if args.outfile:
-        save_dataset_file(
-            my_data,
-            file_name=args.outfile,
-            force_format=args.out_format,
-            extra_args=extra_args,
-        )
-    elif args.out_format:
-        export_dataset(my_data, args.out_format, extra_args=extra_args)
-    else:
-        print(my_data)
+    try:
+        if args.outfile:
+            save_dataset_file(
+                my_data,
+                file_name=args.outfile,
+                force_format=args.out_format,
+                extra_args=extra_args,
+            )
+        elif args.out_format:
+            export_dataset(my_data, args.out_format, extra_args=extra_args)
+        else:
+            print(my_data)
+    except TublubError as exc:
+        sys.exit(str(exc))
 
     return 0
 
@@ -84,7 +95,8 @@ def load_dataset_file(file_name: Path, extra_args: dict[str, Any]) -> tablib.Dat
     if detect_format is None:
         detect_format = guess_format
     if detect_format is None:
-        sys.exit(f"Unable to detect format for: {file_name}")
+        msg = f"Unable to detect format for: {file_name}"
+        raise TublubError(msg)
 
     open_mode = "rb" if is_bin(detect_format) else "r"
     newline = OPEN_EXTRA_ARGS.get(detect_format, {}).get("newline")
@@ -103,8 +115,8 @@ def save_dataset_file(
     """Save a Tablib dataset to a file."""
     file_format = force_format or guess_file_format(file_name)
     if file_format is None:
-        sys.exit(f"Unable to detect target file format for: {file_name}")
-        return  # unreachable; helps ty understand the control flow
+        msg = f"Unable to detect target file format for: {file_name}"
+        raise TublubError(msg)
 
     newline = OPEN_EXTRA_ARGS.get(file_format, {}).get("newline")
     with file_name.open("wb" if is_bin(file_format) else "w", newline=newline) as fh:
@@ -127,7 +139,8 @@ def export_dataset(
 
     if file_handle is sys.stdout and sys.stdout.isatty():
         if is_bin(target_format):
-            sys.exit(f"Format {target_format} is binary, not printing to console!")
+            msg = f"Format {target_format} is binary, not printing to console!"
+            raise TublubError(msg)
         print(output)
         return
     file_handle.write(output)
