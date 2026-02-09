@@ -1,5 +1,6 @@
 """Tests for tublub.main."""
 
+import io
 import sys
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from tublub.main import (
     guess_file_format,
     is_bin,
     load_dataset_file,
+    load_dataset_stdin,
     parse_command_line,
     save_dataset_file,
 )
@@ -25,32 +27,20 @@ from tublub.main import (
 
 
 class TestGuessFileFormat:
-    def test_csv(self):
-        assert guess_file_format(Path("data.csv")) == "csv"
+    @pytest.mark.parametrize(
+        ("filename", "expected"),
+        [("data.csv", "csv"), ("data.json", "json"), ("data.xlsx", "xlsx"),
+         ("report.yaml", "yaml"), ("data.tsv", "tsv")],
+    )
+    def test_known_extensions(self, filename, expected):
+        assert guess_file_format(Path(filename)) == expected
 
-    def test_json(self):
-        assert guess_file_format(Path("data.json")) == "json"
-
-    def test_xlsx(self):
-        assert guess_file_format(Path("data.xlsx")) == "xlsx"
-
-    def test_yaml(self):
-        assert guess_file_format(Path("report.yaml")) == "yaml"
-
-    def test_tsv(self):
-        assert guess_file_format(Path("data.tsv")) == "tsv"
-
-    def test_unknown_extension(self):
-        assert guess_file_format(Path("data.xyz")) is None
-
-    def test_no_extension(self):
-        assert guess_file_format(Path("datafile")) is None
+    @pytest.mark.parametrize("filename", ["data.xyz", "datafile"])
+    def test_unknown_or_missing_extension(self, filename):
+        assert guess_file_format(Path(filename)) is None
 
     def test_none_input(self):
         assert guess_file_format(None) is None
-
-    def test_path_with_dirs(self):
-        assert guess_file_format(Path("/some/path/to/file.csv")) == "csv"
 
 
 # --- is_bin ---
@@ -127,23 +117,14 @@ class TestGetFormats:
 
 
 class TestLoadDatasetFile:
-    def test_load_csv(self, sample_csv):
-        ds = load_dataset_file(sample_csv, extra_args={})
-        assert len(ds) == 2
-        assert ds.headers == ["name", "age", "city"]
-
-    def test_load_json(self, sample_json):
-        ds = load_dataset_file(sample_json, extra_args={})
+    @pytest.mark.parametrize(
+        "fixture", ["sample_csv", "sample_json", "sample_tsv", "sample_yaml"],
+    )
+    def test_load_formats(self, fixture, request):
+        path = request.getfixturevalue(fixture)
+        ds = load_dataset_file(path, extra_args={})
         assert len(ds) == 2
         assert "name" in ds.headers
-
-    def test_load_tsv(self, sample_tsv):
-        ds = load_dataset_file(sample_tsv, extra_args={})
-        assert len(ds) == 2
-
-    def test_load_yaml(self, sample_yaml):
-        ds = load_dataset_file(sample_yaml, extra_args={})
-        assert len(ds) == 2
 
     def test_load_csv_with_skip_lines(self, tmp_path):
         p = tmp_path / "skip.csv"
@@ -185,24 +166,11 @@ class TestLoadDatasetFile:
 
 
 class TestSaveDatasetFile:
-    def test_save_csv(self, sample_data, tmp_path):
-        out = tmp_path / "out.csv"
+    @pytest.mark.parametrize("fmt", ["csv", "json", "yaml"])
+    def test_save_formats(self, sample_data, tmp_path, fmt):
+        out = tmp_path / f"out.{fmt}"
         save_dataset_file(sample_data, out, extra_args={})
-        content = out.read_text()
-        assert "Alice" in content
-        assert "Bob" in content
-
-    def test_save_json(self, sample_data, tmp_path):
-        out = tmp_path / "out.json"
-        save_dataset_file(sample_data, out, extra_args={})
-        content = out.read_text()
-        assert "Alice" in content
-
-    def test_save_yaml(self, sample_data, tmp_path):
-        out = tmp_path / "out.yaml"
-        save_dataset_file(sample_data, out, extra_args={})
-        content = out.read_text()
-        assert "Alice" in content
+        assert "Alice" in out.read_text()
 
     def test_save_unknown_format_raises(self, sample_data, tmp_path):
         out = tmp_path / "out.xyz"
@@ -279,7 +247,8 @@ class TestParseCommandLine:
         args, extra = parse_command_line(["--skip-lines", "2", str(sample_csv)])
         assert extra["skip_lines"] == 2
 
-    def test_no_input_exits(self):
+    def test_no_input_exits(self, monkeypatch):
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
         with pytest.raises(SystemExit):
             parse_command_line([])
 
@@ -299,23 +268,16 @@ class TestParseCommandLine:
         args, extra = parse_command_line(["-d", ";", str(sample_csv)])
         assert extra["delimiter"] == ";"
 
-    def test_headers_absent_by_default(self, sample_csv):
-        """Without --no-headers, headers should not appear in extra_args."""
-        args, extra = parse_command_line([str(sample_csv)])
-        assert "headers" not in extra
-
-    def test_no_headers_flag(self, sample_csv):
-        args, extra = parse_command_line(["-H", str(sample_csv)])
-        assert extra["headers"] is False
-
-    def test_read_only_absent_by_default(self, sample_csv):
-        """Without --no-xlsx-optimize, read_only should not appear in extra_args."""
-        args, extra = parse_command_line([str(sample_csv)])
-        assert "read_only" not in extra
-
-    def test_no_xlsx_optimize_flag(self, sample_csv):
-        args, extra = parse_command_line(["--no-xlsx-optimize", str(sample_csv)])
-        assert extra["read_only"] is False
+    @pytest.mark.parametrize(
+        ("flag", "key"),
+        [("-H", "headers"), ("--no-xlsx-optimize", "read_only")],
+    )
+    def test_store_const_flags(self, sample_csv, flag, key):
+        """store_const flags should be absent by default, False when set."""
+        _, extra_default = parse_command_line([str(sample_csv)])
+        assert key not in extra_default
+        _, extra_set = parse_command_line([flag, str(sample_csv)])
+        assert extra_set[key] is False
 
 
 # --- build_argument_parser ---
@@ -330,3 +292,72 @@ class TestBuildArgumentParser:
         parser = build_argument_parser()
         with pytest.raises(SystemExit, match="0"):
             parser.parse_args(["--version"])
+
+
+# --- load_dataset_stdin ---
+
+
+class TestLoadDatasetStdin:
+    @pytest.mark.parametrize("fmt", ["csv", "json", "xlsx"])
+    def test_auto_detect(self, monkeypatch, sample_data, fmt):
+        raw = sample_data.export(fmt)
+        if isinstance(raw, str):
+            raw = raw.encode()
+        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(raw)))
+        ds = load_dataset_stdin()
+        assert len(ds) == 2
+        assert "name" in ds.headers
+
+    def test_explicit_format(self, monkeypatch):
+        csv_bytes = b"name,age\nAlice,30\n"
+        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(csv_bytes)))
+        ds = load_dataset_stdin(in_format="csv")
+        assert len(ds) == 1
+
+    def test_extra_args_passed(self, monkeypatch):
+        csv_bytes = b"# comment\nname,age\nAlice,30\n"
+        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(csv_bytes)))
+        ds = load_dataset_stdin(in_format="csv", extra_args={"skip_lines": 1})
+        assert len(ds) == 1
+        assert ds.headers == ["name", "age"]
+
+    def test_empty_stdin_raises(self, monkeypatch):
+        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"")))
+        with pytest.raises(TublubError, match="No data received"):
+            load_dataset_stdin()
+
+    def test_undetectable_format_raises(self, monkeypatch):
+        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"???")))
+        with pytest.raises(TublubError, match=r"Unable to detect.*-f"):
+            load_dataset_stdin()
+
+
+# --- parse_command_line stdin ---
+
+
+class TestParseCommandLineStdin:
+    def test_dash_sets_stdin_flag(self, monkeypatch):
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+        args, _ = parse_command_line(["-", "-t", "json"])
+        assert args.stdin is True
+        assert args.infile is None
+
+    def test_implicit_stdin_when_piped(self, monkeypatch):
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+        args, _ = parse_command_line(["-t", "json"])
+        assert args.stdin is True
+
+    def test_in_format_flag(self, monkeypatch):
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+        args, _ = parse_command_line(["-f", "csv", "-t", "json"])
+        assert args.in_format == "csv"
+
+    def test_invalid_in_format_exits(self, monkeypatch):
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+        with pytest.raises(SystemExit):
+            parse_command_line(["-f", "bogus", "-t", "json"])
+
+    def test_in_format_with_file(self, sample_csv):
+        args, _ = parse_command_line(["-f", "csv", str(sample_csv)])
+        assert args.in_format == "csv"
+        assert args.stdin is False

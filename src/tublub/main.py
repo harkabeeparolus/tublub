@@ -4,7 +4,6 @@ If no outfile is specified the result will be printed to STDOUT instead,
 either in the requested output format, or pretty-printed as a table.
 """
 
-# TODO: Handle pipelines.
 # TODO: Multiple input files to single XLSX Databook output
 
 import argparse
@@ -46,11 +45,17 @@ def cli() -> int:
         return 0
 
     try:
-        my_data = load_dataset_file(args.infile, extra_args=extra_args)
+        if args.stdin:
+            my_data = load_dataset_stdin(
+                in_format=args.in_format, extra_args=extra_args
+            )
+        else:
+            my_data = load_dataset_file(args.infile, extra_args=extra_args)
     except TublubError as exc:
         sys.exit(str(exc))
     if not my_data:
-        sys.exit(f"No data was loaded from {args.infile}")
+        source = "stdin" if args.stdin else str(args.infile)
+        sys.exit(f"No data was loaded from {source}")
 
     try:
         if args.outfile:
@@ -117,6 +122,44 @@ def load_dataset_file(file_name: Path, extra_args: dict[str, Any]) -> tablib.Dat
 
     with file_name.open(open_mode, newline=newline) as fh:
         return tablib.import_set(fh, format=detect_format, **extra_load_args)
+
+
+def load_dataset_stdin(
+    in_format: str | None = None, extra_args: dict[str, Any] | None = None
+) -> tablib.Dataset:
+    """Load a dataset from stdin."""
+    if extra_args is None:
+        extra_args = {}
+    raw = sys.stdin.buffer.read()
+    if not raw:
+        msg = "No data received on stdin"
+        raise TublubError(msg)
+
+    detect_format = in_format
+    if detect_format is None:
+        # Try binary first (detects xlsx, json, yaml, etc.)
+        detect_format = tablib.detect_format(raw)
+        if detect_format is None:
+            # Fall back to text (detects csv, tsv)
+            try:
+                text = raw.decode()
+            except UnicodeDecodeError:
+                text = None
+            if text is not None:
+                detect_format = tablib.detect_format(text)
+    if detect_format is None:
+        msg = "Unable to detect input format from stdin; use -f to specify it"
+        raise TublubError(msg)
+
+    extra_load_args = filter_args(LOAD_EXTRA_ARGS, extra_args, detect_format)
+
+    # Provide data in the right type: str for text formats, bytes for binary
+    if is_bin(detect_format):
+        data = raw
+    else:
+        data = raw.decode() if isinstance(raw, bytes) else raw
+
+    return tablib.import_set(data, format=detect_format, **extra_load_args)
 
 
 def save_dataset_file(
@@ -191,12 +234,20 @@ def parse_command_line(
     parser = build_argument_parser()
     args = parser.parse_args(argv)
 
+    # Detect stdin mode: explicit "-" or implicit piped stdin
+    args.stdin = False
+    if args.infile == Path("-"):
+        args.infile = None
+        args.stdin = True
+    elif not args.infile and not args.list and not sys.stdin.isatty():
+        args.stdin = True
+
     # Sanity checking
 
     if args.list and (args.infile or args.outfile):
         parser.error("Can not combine --list with filename(s)")
 
-    if not args.list and not args.infile:
+    if not args.list and not args.infile and not args.stdin:
         parser.error("No input data provided.")
 
     if args.infile and not args.infile.is_file():
@@ -204,6 +255,11 @@ def parse_command_line(
 
     if args.out_format and args.out_format not in get_formats():
         parser.error(f"Invalid format {args.out_format}, use one of: {get_formats()}")
+
+    if args.in_format and args.in_format not in get_formats():
+        parser.error(
+            f"Invalid input format {args.in_format}, use one of: {get_formats()}"
+        )
 
     # Make a dict of all args.xxx for xxx in the EXTRA_ARGS structures
     all_extra_args = set().union(*LOAD_EXTRA_ARGS.values(), *SAVE_EXTRA_ARGS.values())
@@ -265,6 +321,13 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default=None,
         help="disable optimized ('read_only') loading of XLSX files",
     )
+    input_group.add_argument(
+        "-f",
+        "--in-format",
+        metavar="FMT",
+        dest="in_format",
+        help="input format (required for stdin if auto-detection fails)",
+    )
 
     output_group = parser.add_argument_group(title="output options")
     output_group.add_argument(
@@ -279,7 +342,9 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="CLI output; Tabulate table format, e.g. 'fancy_grid'",
     )
 
-    parser.add_argument("infile", nargs="?", type=Path, help="input (source) file")
+    parser.add_argument(
+        "infile", nargs="?", type=Path, help="input (source) file, or '-' for stdin"
+    )
     parser.add_argument(
         "outfile", nargs="?", type=Path, help="output (destination) file"
     )
