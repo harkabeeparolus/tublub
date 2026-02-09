@@ -11,6 +11,7 @@ from tublub.main import (
     LOAD_EXTRA_ARGS,
     SAVE_EXTRA_ARGS,
     TublubError,
+    _looks_like_text_lines,
     build_argument_parser,
     export_dataset,
     filter_args,
@@ -29,8 +30,13 @@ from tublub.main import (
 class TestGuessFileFormat:
     @pytest.mark.parametrize(
         ("filename", "expected"),
-        [("data.csv", "csv"), ("data.json", "json"), ("data.xlsx", "xlsx"),
-         ("report.yaml", "yaml"), ("data.tsv", "tsv")],
+        [
+            ("data.csv", "csv"),
+            ("data.json", "json"),
+            ("data.xlsx", "xlsx"),
+            ("report.yaml", "yaml"),
+            ("data.tsv", "tsv"),
+        ],
     )
     def test_known_extensions(self, filename, expected):
         assert guess_file_format(Path(filename)) == expected
@@ -113,12 +119,40 @@ class TestGetFormats:
         assert get_formats() is get_formats()
 
 
+# --- _looks_like_text_lines ---
+
+
+class TestLooksLikeTextLines:
+    """Unit tests for the single-column text heuristic."""
+
+    def test_single_column_data(self):
+        assert _looks_like_text_lines("name\nAlice\nBob\n") is True
+
+    def test_single_line_rejected(self):
+        assert _looks_like_text_lines("hello") is False
+
+    def test_empty_string_rejected(self):
+        assert _looks_like_text_lines("") is False
+
+    def test_whitespace_only_rejected(self):
+        assert _looks_like_text_lines("  \n  \n") is False
+
+    @pytest.mark.parametrize("delimiter", [",", "\t", ";", "|"])
+    def test_delimited_data_rejected(self, delimiter):
+        text = f"a{delimiter}b\n1{delimiter}2\n"
+        assert _looks_like_text_lines(text) is False
+
+    def test_prose_with_commas_rejected(self):
+        assert _looks_like_text_lines("Hello, world.\nDear sir, ...\n") is False
+
+
 # --- load_dataset_file ---
 
 
 class TestLoadDatasetFile:
     @pytest.mark.parametrize(
-        "fixture", ["sample_csv", "sample_json", "sample_tsv", "sample_yaml"],
+        "fixture",
+        ["sample_csv", "sample_json", "sample_tsv", "sample_yaml"],
     )
     def test_load_formats(self, fixture, request):
         path = request.getfixturevalue(fixture)
@@ -154,6 +188,29 @@ class TestLoadDatasetFile:
         p.write_bytes(sample_data.export("xlsx"))
         ds = load_dataset_file(p, extra_args={})
         assert len(ds) == 2
+
+    def test_load_single_column_txt(self, tmp_path):
+        """Single-column data in a .txt file should be detected via heuristic."""
+        p = tmp_path / "names.txt"
+        p.write_text("name\nAlice\nBob\n")
+        ds = load_dataset_file(p, extra_args={})
+        assert len(ds) == 2
+        assert ds.headers == ["name"]
+
+    def test_load_single_column_no_extension(self, tmp_path):
+        """Single-column data without extension should be detected via heuristic."""
+        p = tmp_path / "data"
+        p.write_text("name\nAlice\nBob\n")
+        ds = load_dataset_file(p, extra_args={})
+        assert len(ds) == 2
+        assert ds.headers == ["name"]
+
+    def test_load_in_format_overrides_detection(self, tmp_path):
+        """-f flag should override both detection and extension."""
+        p = tmp_path / "data.txt"
+        p.write_text("name,age\nAlice,30\n")
+        ds = load_dataset_file(p, extra_args={}, in_format="csv")
+        assert ds.headers == ["name", "age"]
 
     def test_load_unknown_format_raises(self, tmp_path):
         p = tmp_path / "data.xyz"
@@ -325,6 +382,14 @@ class TestLoadDatasetStdin:
         monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"")))
         with pytest.raises(TublubError, match="No data received"):
             load_dataset_stdin()
+
+    def test_single_column_heuristic(self, monkeypatch):
+        """Single-column data on stdin should be detected as TSV via heuristic."""
+        raw = b"name\nAlice\nBob\n"
+        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(raw)))
+        ds = load_dataset_stdin()
+        assert len(ds) == 2
+        assert ds.headers == ["name"]
 
     def test_undetectable_format_raises(self, monkeypatch):
         monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"???")))
