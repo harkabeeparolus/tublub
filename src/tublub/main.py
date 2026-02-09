@@ -12,6 +12,7 @@ import csv
 import functools
 import sys
 from pathlib import Path
+from typing import IO, Any
 
 import tablib
 import tablib.exceptions
@@ -31,7 +32,7 @@ SAVE_EXTRA_ARGS = {"cli": {"tablefmt"}, "csv": {"delimiter", "quotechar", "diale
 OPEN_EXTRA_ARGS = {"csv": {"newline": ""}}
 
 
-def cli():
+def cli() -> None:
     """Run the command line interface."""
     args, extra_args = parse_command_line()
 
@@ -56,7 +57,7 @@ def cli():
         print(my_data)
 
 
-def guess_file_format(filename=None):
+def guess_file_format(filename: str | None = None) -> str | None:
     """Guess format from file name."""
     if filename:
         if (suf := Path(filename).suffix.lstrip(".")) and suf in get_formats():
@@ -64,7 +65,7 @@ def guess_file_format(filename=None):
     return None
 
 
-def load_dataset_file(file_name, extra_args):
+def load_dataset_file(file_name: str, extra_args: dict[str, Any]) -> tablib.Dataset:
     """Load a file into a Tablib dataset."""
     guess_format = guess_file_format(file_name)
 
@@ -89,7 +90,12 @@ def load_dataset_file(file_name, extra_args):
     return imported_data
 
 
-def save_dataset_file(data, file_name, extra_args, force_format=None):
+def save_dataset_file(
+    data: tablib.Dataset,
+    file_name: str,
+    extra_args: dict[str, Any],
+    force_format: str | None = None,
+) -> None:
     """Save a Tablib dataset to a file."""
     file_format = force_format or guess_file_format(file_name)
     if not file_format:
@@ -102,7 +108,12 @@ def save_dataset_file(data, file_name, extra_args, force_format=None):
     print(f"Saved '{file_name}', {len(data)} records ({file_format})")
 
 
-def export_dataset(data, target_format, extra_args, file_handle=sys.stdout):
+def export_dataset(
+    data: tablib.Dataset,
+    target_format: str,
+    extra_args: dict[str, Any],
+    file_handle: IO[str] | IO[bytes] = sys.stdout,
+) -> None:
     """Export dataset to a file handle or other stream."""
     extra_save_args = filter_args(SAVE_EXTRA_ARGS, extra_args, target_format)
     output = data.export(target_format, **extra_save_args)
@@ -115,7 +126,11 @@ def export_dataset(data, target_format, extra_args, file_handle=sys.stdout):
     file_handle.write(output)
 
 
-def filter_args(args_by_format, user_args, file_format):
+def filter_args(
+    args_by_format: dict[str, set[str]],
+    user_args: dict[str, Any],
+    file_format: str | None,
+) -> dict[str, Any]:
     """Create and select keyword arguments for Dataset().load(),
     filtered by input data format.
     """
@@ -124,17 +139,19 @@ def filter_args(args_by_format, user_args, file_format):
 
 
 @functools.cache
-def get_formats():
+def get_formats() -> tuple[str, ...]:
     """Get a list of all available Tablib formats."""
     return tuple(x.title for x in tablib.formats.registry.formats())
 
 
-def is_bin(data_format):
+def is_bin(data_format: str | None) -> bool:
     """Return true if data format is binary."""
     return bool(data_format and data_format in BINARY_FORMATS)
 
 
-def parse_command_line(argv=None):
+def parse_command_line(
+    argv: list[str] | None = None,
+) -> tuple[argparse.Namespace, dict[str, Any]]:
     """Parse and return input arguments."""
     parser = build_argument_parser()
     args = parser.parse_args(argv)
@@ -164,7 +181,7 @@ def parse_command_line(argv=None):
     return args, extra_args
 
 
-def build_argument_parser():
+def build_argument_parser() -> argparse.ArgumentParser:
     """Parse and return command line arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(

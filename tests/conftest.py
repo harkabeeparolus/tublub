@@ -47,5 +47,7 @@ def sample_json(tmp_path):
 def sample_yaml(tmp_path):
     """Write a YAML file and return its path."""
     p = tmp_path / "data.yaml"
-    p.write_text("- {name: Alice, age: 30, city: Stockholm}\n- {name: Bob, age: 25, city: Gothenburg}\n")
+    p.write_text(
+        "- {name: Alice, age: 30, city: Stockholm}\n- {name: Bob, age: 25, city: Gothenburg}\n"
+    )
     return p

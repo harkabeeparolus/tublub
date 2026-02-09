@@ -6,13 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A CLI tool that converts between tabular data formats (CSV, JSON, XLSX, YAML, etc.) using the Tablib library. Entry point: `tublub.main:cli`.
 
+One of the main challenges with Tablib is that it does not help with auto-detection and opening files the correct way for each format. We try to handle that reliably in tublub.
+
 ## Commands
 
 ```bash
 uv run tublub --list              # run the tool (show available formats)
+uv run ruff check                 # lint
+uv run ruff format                # auto-format
+uv run mypy                       # type hints
+uv run ty                         # type hints
 uv run pytest                     # run tests
-uv run ruff check src/            # lint
-uv run ruff format --check src/   # check formatting
 ```
 
 ## Architecture
