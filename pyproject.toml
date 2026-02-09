@@ -1,6 +1,6 @@
 [project]
 name = "tublub"
-version = "0.4.0"
+version = "0.4.1"
 description = "Convert tabular data files with Tablib."
 readme = "README.md"
 license = "MIT"
