@@ -7,9 +7,7 @@ from pathlib import Path
 import pytest
 
 from tublub.main import (
-    BINARY_FORMATS,
-    LOAD_EXTRA_ARGS,
-    SAVE_EXTRA_ARGS,
+    FORMATS,
     TublubError,
     _looks_like_text_lines,
     build_argument_parser,
@@ -53,7 +51,7 @@ class TestGuessFileFormat:
 
 
 class TestIsBin:
-    @pytest.mark.parametrize("fmt", sorted(BINARY_FORMATS))
+    @pytest.mark.parametrize("fmt", sorted(k for k, v in FORMATS.items() if v.binary))
     def test_binary_formats(self, fmt):
         assert is_bin(fmt) is True
 
@@ -74,32 +72,32 @@ class TestIsBin:
 class TestFilterArgs:
     def test_filters_to_matching_format(self):
         user_args = {"skip_lines": 2, "delimiter": ","}
-        result = filter_args(LOAD_EXTRA_ARGS, user_args, "csv")
+        result = filter_args("load", user_args, "csv")
         assert result == {"skip_lines": 2, "delimiter": ","}
 
     def test_excludes_irrelevant_args(self):
         user_args = {"skip_lines": 2, "delimiter": ","}
-        result = filter_args(LOAD_EXTRA_ARGS, user_args, "xlsx")
+        result = filter_args("load", user_args, "xlsx")
         assert result == {"skip_lines": 2}
         assert "delimiter" not in result
 
     def test_unknown_format_returns_empty(self):
         user_args = {"skip_lines": 2}
-        result = filter_args(LOAD_EXTRA_ARGS, user_args, "json")
+        result = filter_args("load", user_args, "json")
         assert result == {}
 
     def test_none_values_excluded(self):
         user_args = {"skip_lines": None, "delimiter": ","}
-        result = filter_args(LOAD_EXTRA_ARGS, user_args, "csv")
+        result = filter_args("load", user_args, "csv")
         assert result == {"delimiter": ","}
 
     def test_empty_user_args(self):
-        result = filter_args(LOAD_EXTRA_ARGS, {}, "csv")
+        result = filter_args("load", {}, "csv")
         assert result == {}
 
     def test_save_extra_args(self):
         user_args = {"tablefmt": "fancy_grid"}
-        result = filter_args(SAVE_EXTRA_ARGS, user_args, "cli")
+        result = filter_args("save", user_args, "cli")
         assert result == {"tablefmt": "fancy_grid"}
 
 

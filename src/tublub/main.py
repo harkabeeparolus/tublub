@@ -10,6 +10,7 @@ import argparse
 import csv
 import functools
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any
 
@@ -23,16 +24,33 @@ class TublubError(ValueError):
     """Raised for tublub-specific errors (bad format, empty data, etc.)."""
 
 
+@dataclass(frozen=True)
+class FormatConfig:
+    """Per-format configuration for loading, saving, and opening files."""
+
+    binary: bool = False
+    load_args: frozenset[str] = frozenset()
+    save_args: frozenset[str] = frozenset()
+    open_kwargs: dict[str, Any] = field(default_factory=dict)
+
+
 # https://tablib.readthedocs.io/en/stable/formats.html
-BINARY_FORMATS = {"xlsx", "xls", "dbf", "ods"}
-LOAD_EXTRA_ARGS = {
-    "csv": {"skip_lines", "headers", "delimiter", "quotechar", "dialect"},
-    "tsv": {"skip_lines", "headers"},
-    "xls": {"skip_lines"},
-    "xlsx": {"skip_lines", "read_only"},
+FORMATS: dict[str, FormatConfig] = {
+    "csv": FormatConfig(
+        load_args=frozenset(
+            {"skip_lines", "headers", "delimiter", "quotechar", "dialect"}
+        ),
+        save_args=frozenset({"delimiter", "quotechar", "dialect"}),
+        open_kwargs={"newline": ""},
+    ),
+    "tsv": FormatConfig(load_args=frozenset({"skip_lines", "headers"})),
+    "xlsx": FormatConfig(binary=True, load_args=frozenset({"skip_lines", "read_only"})),
+    "xls": FormatConfig(binary=True, load_args=frozenset({"skip_lines"})),
+    "dbf": FormatConfig(binary=True),
+    "ods": FormatConfig(binary=True),
+    "cli": FormatConfig(save_args=frozenset({"tablefmt"})),
 }
-SAVE_EXTRA_ARGS = {"cli": {"tablefmt"}, "csv": {"delimiter", "quotechar", "dialect"}}
-OPEN_EXTRA_ARGS = {"csv": {"newline": ""}}
+_DEFAULT_FMT = FormatConfig()
 
 
 def cli() -> int:
@@ -109,9 +127,10 @@ def load_dataset_file(
         msg = f"Unable to detect format for: {file_name}"
         raise TublubError(msg)
 
-    open_mode = "rb" if is_bin(fmt) else "r"
-    newline = OPEN_EXTRA_ARGS.get(fmt, {}).get("newline")
-    extra_load_args = filter_args(LOAD_EXTRA_ARGS, extra_args, fmt)
+    cfg = FORMATS.get(fmt, _DEFAULT_FMT)
+    open_mode = "rb" if cfg.binary else "r"
+    newline = cfg.open_kwargs.get("newline")
+    extra_load_args = filter_args("load", extra_args, fmt)
 
     with file_name.open(open_mode, newline=newline) as fh:
         return tablib.import_set(fh, format=fmt, **extra_load_args)
@@ -174,7 +193,7 @@ def load_dataset_stdin(
         msg = "Unable to detect input format from stdin; use -f to specify it"
         raise TublubError(msg)
 
-    extra_load_args = filter_args(LOAD_EXTRA_ARGS, extra_args, detect_format)
+    extra_load_args = filter_args("load", extra_args, detect_format)
 
     # Provide data in the right type: str for text formats, bytes for binary
     if is_bin(detect_format):
@@ -197,8 +216,9 @@ def save_dataset_file(
         msg = f"Unable to detect target file format for: {file_name}"
         raise TublubError(msg)
 
-    newline = OPEN_EXTRA_ARGS.get(file_format, {}).get("newline")
-    with file_name.open("wb" if is_bin(file_format) else "w", newline=newline) as fh:
+    cfg = FORMATS.get(file_format, _DEFAULT_FMT)
+    newline = cfg.open_kwargs.get("newline")
+    with file_name.open("wb" if cfg.binary else "w", newline=newline) as fh:
         export_dataset(data, file_format, extra_args, file_handle=fh)
 
     print(f"Saved '{file_name}', {len(data)} records ({file_format})")
@@ -222,23 +242,24 @@ def export_dataset(
     if file_handle is None:  # Catch type warning for Pylance
         msg = "No output stream available for export"
         raise TublubError(msg)
-    extra_save_args = filter_args(SAVE_EXTRA_ARGS, extra_args, target_format)
+    extra_save_args = filter_args("save", extra_args, target_format)
     output = data.export(target_format, **extra_save_args)
     file_handle.write(output)
 
 
 def filter_args(
-    args_by_format: dict[str, set[str]],
+    phase: str,
     user_args: dict[str, Any],
     file_format: str | None,
 ) -> dict[str, Any]:
-    """Create and select keyword arguments for Dataset().load().
+    """Select keyword arguments allowed for the given format and phase.
 
-    Filtered by input data format.
+    Phase is "load" or "save".
     """
     if file_format is None:
         return {}
-    allowed = args_by_format.get(file_format, set())
+    cfg = FORMATS.get(file_format, _DEFAULT_FMT)
+    allowed = cfg.load_args if phase == "load" else cfg.save_args
     return {k: v for k, v in user_args.items() if k in allowed and v is not None}
 
 
@@ -265,7 +286,7 @@ def _looks_like_text_lines(text: str) -> bool:
 
 def is_bin(data_format: str | None) -> bool:
     """Return true if data format is binary."""
-    return bool(data_format and data_format in BINARY_FORMATS)
+    return FORMATS.get(data_format or "", _DEFAULT_FMT).binary
 
 
 def parse_command_line(
@@ -302,8 +323,10 @@ def parse_command_line(
             f"Invalid input format {args.in_format}, use one of: {get_formats()}"
         )
 
-    # Make a dict of all args.xxx for xxx in the EXTRA_ARGS structures
-    all_extra_args = set().union(*LOAD_EXTRA_ARGS.values(), *SAVE_EXTRA_ARGS.values())
+    # Make a dict of all args.xxx for xxx in the FormatConfig structures
+    all_extra_args: set[str] = set()
+    for cfg in FORMATS.values():
+        all_extra_args |= cfg.load_args | cfg.save_args
     extra_args = {
         key: value
         for key in all_extra_args
