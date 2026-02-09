@@ -11,8 +11,6 @@ import argparse
 import csv
 import functools
 import sys
-from collections import defaultdict
-from operator import or_
 from pathlib import Path
 
 import tablib
@@ -121,12 +119,8 @@ def filter_args(args_by_format, user_args, file_format):
     """Create and select keyword arguments for Dataset().load(),
     filtered by input data format.
     """
-    load_filter = defaultdict(set, args_by_format)
-    return {
-        k: v
-        for k, v in user_args.items()
-        if k in load_filter[file_format] and v is not None
-    }
+    allowed = args_by_format.get(file_format, set())
+    return {k: v for k, v in user_args.items() if k in allowed and v is not None}
 
 
 @functools.cache
@@ -160,9 +154,7 @@ def parse_command_line(argv=None):
         parser.error(f"Invalid format {args.out_format}, use one of: {get_formats()}")
 
     # Make a dict of all args.xxx for xxx in the EXTRA_ARGS structures
-    all_extra_args = functools.reduce(
-        or_, {**LOAD_EXTRA_ARGS, **SAVE_EXTRA_ARGS}.values()
-    )
+    all_extra_args = set().union(*LOAD_EXTRA_ARGS.values(), *SAVE_EXTRA_ARGS.values())
     extra_args = {
         key: value
         for key in all_extra_args
