@@ -70,6 +70,9 @@ def load_dataset_file(file_name: Path, extra_args: dict[str, Any]) -> tablib.Dat
     """Load a file into a Tablib dataset."""
     guess_format = guess_file_format(file_name)
 
+    # We open the file twice: once to detect format, once to import. We can't
+    # simply seek back because the open mode (binary/text) may change after
+    # detection resolves the actual format.
     detect_format = None
     with file_name.open("rb" if is_bin(guess_format) else "r") as fh:
         detect_format = tablib.detect_format(fh)
@@ -101,7 +104,7 @@ def save_dataset_file(
     file_format = force_format or guess_file_format(file_name)
     if file_format is None:
         sys.exit(f"Unable to detect target file format for: {file_name}")
-        return
+        return  # unreachable; helps ty understand the control flow
 
     newline = OPEN_EXTRA_ARGS.get(file_format, {}).get("newline")
     with file_name.open("wb" if is_bin(file_format) else "w", newline=newline) as fh:
@@ -114,9 +117,11 @@ def export_dataset(
     data: tablib.Dataset,
     target_format: str,
     extra_args: dict[str, Any],
-    file_handle: IO[str] | IO[bytes] = sys.stdout,
+    file_handle: IO[str] | IO[bytes] | None = None,
 ) -> None:
     """Export dataset to a file handle or other stream."""
+    if file_handle is None:
+        file_handle = sys.stdout
     extra_save_args = filter_args(SAVE_EXTRA_ARGS, extra_args, target_format)
     output = data.export(target_format, **extra_save_args)
 
