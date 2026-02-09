@@ -8,6 +8,10 @@ A CLI tool that converts between tabular data formats (CSV, JSON, XLSX, YAML, et
 
 One of the main challenges with Tablib is that it does not help with auto-detection and opening files the correct way for each format. We try to handle that reliably in tublub.
 
+### Tablib detect_format quirk
+
+`tablib.detect_format()` requires the file to be opened in the right mode for each format. Binary formats (xlsx, xls, ods, dbf) need `"rb"` or Python raises `UnicodeDecodeError` before tablib sees the data. CSV/TSV need `"r"` because `csv.Sniffer` requires `str` (returns `None` on bytes). JSON and YAML work in either mode. There is no single open mode that works for all formats, so when the file extension is unknown we try binary first then text.
+
 ## Commands
 
 ```bash

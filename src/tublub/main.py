@@ -84,9 +84,22 @@ def load_dataset_file(file_name: Path, extra_args: dict[str, Any]) -> tablib.Dat
     # We open the file twice: once to detect format, once to import. We can't
     # simply seek back because the open mode (binary/text) may change after
     # detection resolves the actual format.
+    #
+    # Tablib's detect_format requires the correct open mode per format:
+    # binary formats (xlsx, xls, ods, dbf) need "rb", while csv/tsv need "r"
+    # (csv.Sniffer requires str). JSON and YAML work in either mode.
+    # When the extension gives us a hint we use it; otherwise we try "rb"
+    # first (detects binary + json + yaml) then fall back to "r" (csv/tsv).
     detect_format = None
-    with file_name.open("rb" if is_bin(guess_format) else "r") as fh:
-        detect_format = tablib.detect_format(fh)
+    if guess_format is not None:
+        with file_name.open("rb" if is_bin(guess_format) else "r") as fh:
+            detect_format = tablib.detect_format(fh)
+    else:
+        with file_name.open("rb") as fh:
+            detect_format = tablib.detect_format(fh)
+        if detect_format is None:
+            with file_name.open("r") as fh:
+                detect_format = tablib.detect_format(fh)
     if guess_format and guess_format != detect_format:
         print(
             f"Guessed mode {guess_format} differs from Tablib detected {detect_format}",
@@ -133,16 +146,15 @@ def export_dataset(
 ) -> None:
     """Export dataset to a file handle or other stream."""
     if file_handle is None:
-        file_handle = sys.stdout
+        if is_bin(target_format):
+            if sys.stdout.isatty():
+                msg = f"Format {target_format} is binary, not printing to console!"
+                raise TublubError(msg)
+            file_handle = sys.stdout.buffer
+        else:
+            file_handle = sys.stdout
     extra_save_args = filter_args(SAVE_EXTRA_ARGS, extra_args, target_format)
     output = data.export(target_format, **extra_save_args)
-
-    if file_handle is sys.stdout and sys.stdout.isatty():
-        if is_bin(target_format):
-            msg = f"Format {target_format} is binary, not printing to console!"
-            raise TublubError(msg)
-        print(output)
-        return
     file_handle.write(output)
 
 
@@ -234,7 +246,9 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "-H",
         "--no-headers",
         dest="headers",
-        action="store_false",
+        action="store_const",
+        const=False,
+        default=None,
         help="CSV/TSV input data has no header row",
     )
     input_group.add_argument(
@@ -246,7 +260,9 @@ def build_argument_parser() -> argparse.ArgumentParser:
     input_group.add_argument(
         "--no-xlsx-optimize",
         dest="read_only",
-        action="store_false",
+        action="store_const",
+        const=False,
+        default=None,
         help="disable optimized ('read_only') loading of XLSX files",
     )
 

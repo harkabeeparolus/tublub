@@ -159,6 +159,21 @@ class TestLoadDatasetFile:
         assert len(ds) == 1
         assert ds.headers == ["name", "age"]
 
+    def test_load_csv_no_extension(self, tmp_path):
+        """CSV file without extension should be detected via text-mode fallback."""
+        p = tmp_path / "data"
+        p.write_text("name,age,city\nAlice,30,Stockholm\nBob,25,Gothenburg\n")
+        ds = load_dataset_file(p, extra_args={})
+        assert len(ds) == 2
+        assert ds.headers == ["name", "age", "city"]
+
+    def test_load_xlsx_no_extension(self, tmp_path, sample_data):
+        """XLSX file without extension should be detected via binary-mode pass."""
+        p = tmp_path / "data"
+        p.write_bytes(sample_data.export("xlsx"))
+        ds = load_dataset_file(p, extra_args={})
+        assert len(ds) == 2
+
     def test_load_unknown_format_raises(self, tmp_path):
         p = tmp_path / "data.xyz"
         p.write_text("not a known format")
@@ -218,6 +233,18 @@ class TestExportDataset:
         with pytest.raises(TublubError, match="binary"):
             export_dataset(sample_data, "xlsx", extra_args={})
 
+    def test_export_binary_to_piped_stdout(self, sample_data, monkeypatch):
+        """Binary export to non-TTY stdout should use stdout.buffer."""
+        chunks = []
+        fake_buffer = type("buf", (), {"write": lambda self, d: chunks.append(d)})()
+        fake_stdout = type(
+            "fake_stdout", (), {"isatty": lambda self: False, "buffer": fake_buffer}
+        )()
+        monkeypatch.setattr(sys, "stdout", fake_stdout)
+        export_dataset(sample_data, "xlsx", extra_args={})
+        assert len(chunks) == 1
+        assert isinstance(chunks[0], bytes)
+
     def test_export_text_to_non_tty(self, sample_data, tmp_path):
         out = tmp_path / "piped.json"
         with out.open("w") as fh:
@@ -272,13 +299,23 @@ class TestParseCommandLine:
         args, extra = parse_command_line(["-d", ";", str(sample_csv)])
         assert extra["delimiter"] == ";"
 
-    def test_headers_false_not_in_extras_by_default(self, sample_csv):
-        """Default headers=True is excluded since it's not None."""
+    def test_headers_absent_by_default(self, sample_csv):
+        """Without --no-headers, headers should not appear in extra_args."""
         args, extra = parse_command_line([str(sample_csv)])
-        # headers defaults to True but the extra_args logic uses
-        # getattr with None default and filters out None values;
-        # True is not None so it gets included
-        assert "headers" not in extra or extra.get("headers") is True
+        assert "headers" not in extra
+
+    def test_no_headers_flag(self, sample_csv):
+        args, extra = parse_command_line(["-H", str(sample_csv)])
+        assert extra["headers"] is False
+
+    def test_read_only_absent_by_default(self, sample_csv):
+        """Without --no-xlsx-optimize, read_only should not appear in extra_args."""
+        args, extra = parse_command_line([str(sample_csv)])
+        assert "read_only" not in extra
+
+    def test_no_xlsx_optimize_flag(self, sample_csv):
+        args, extra = parse_command_line(["--no-xlsx-optimize", str(sample_csv)])
+        assert extra["read_only"] is False
 
 
 # --- build_argument_parser ---
