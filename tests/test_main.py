@@ -156,6 +156,7 @@ class TestLoadDatasetFile:
         path = request.getfixturevalue(fixture)
         ds = load_dataset_file(path, extra_args={})
         assert len(ds) == 2
+        assert ds.headers is not None
         assert "name" in ds.headers
 
     def test_load_csv_with_skip_lines(self, tmp_path):
@@ -361,6 +362,7 @@ class TestLoadDatasetStdin:
         monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(raw)))
         ds = load_dataset_stdin()
         assert len(ds) == 2
+        assert ds.headers is not None
         assert "name" in ds.headers
 
     def test_explicit_format(self, monkeypatch):
