@@ -59,20 +59,19 @@ def cli() -> int:
     return 0
 
 
-def guess_file_format(filename: str | None = None) -> str | None:
+def guess_file_format(filename: Path | None = None) -> str | None:
     """Guess format from file name."""
-    if filename:
-        if (suf := Path(filename).suffix.lstrip(".")) and suf in get_formats():
-            return suf
+    if filename and (suf := filename.suffix.lstrip(".")) and suf in get_formats():
+        return suf
     return None
 
 
-def load_dataset_file(file_name: str, extra_args: dict[str, Any]) -> tablib.Dataset:
+def load_dataset_file(file_name: Path, extra_args: dict[str, Any]) -> tablib.Dataset:
     """Load a file into a Tablib dataset."""
     guess_format = guess_file_format(file_name)
 
     detect_format = None
-    with open(file_name, "rb" if is_bin(guess_format) else "r") as fh:
+    with file_name.open("rb" if is_bin(guess_format) else "r") as fh:
         detect_format = tablib.detect_format(fh)
     if guess_format and guess_format != detect_format:
         print(
@@ -88,15 +87,13 @@ def load_dataset_file(file_name: str, extra_args: dict[str, Any]) -> tablib.Data
     newline = OPEN_EXTRA_ARGS.get(detect_format, {}).get("newline")
     extra_load_args = filter_args(LOAD_EXTRA_ARGS, extra_args, detect_format)
 
-    with open(file_name, open_mode, newline=newline) as fh:
-        imported_data = tablib.import_set(fh, format=detect_format, **extra_load_args)
-
-    return imported_data
+    with file_name.open(open_mode, newline=newline) as fh:
+        return tablib.import_set(fh, format=detect_format, **extra_load_args)
 
 
 def save_dataset_file(
     data: tablib.Dataset,
-    file_name: str,
+    file_name: Path,
     extra_args: dict[str, Any],
     force_format: str | None = None,
 ) -> None:
@@ -107,7 +104,7 @@ def save_dataset_file(
         return
 
     newline = OPEN_EXTRA_ARGS.get(file_format, {}).get("newline")
-    with open(file_name, "wb" if is_bin(file_format) else "w", newline=newline) as fh:
+    with file_name.open("wb" if is_bin(file_format) else "w", newline=newline) as fh:
         export_dataset(data, file_format, extra_args, file_handle=fh)
 
     print(f"Saved '{file_name}', {len(data)} records ({file_format})")
@@ -136,8 +133,9 @@ def filter_args(
     user_args: dict[str, Any],
     file_format: str | None,
 ) -> dict[str, Any]:
-    """Create and select keyword arguments for Dataset().load(),
-    filtered by input data format.
+    """Create and select keyword arguments for Dataset().load().
+
+    Filtered by input data format.
     """
     if file_format is None:
         return {}
@@ -171,7 +169,7 @@ def parse_command_line(
     if not args.list and not args.infile:
         parser.error("No input data provided.")
 
-    if args.infile and not Path(args.infile).is_file():
+    if args.infile and not args.infile.is_file():
         parser.error(f"Input file {args.infile} does not exist.")
 
     if args.out_format and args.out_format not in get_formats():
@@ -247,8 +245,10 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="CLI output; Tabulate table format, e.g. 'fancy_grid'",
     )
 
-    parser.add_argument("infile", nargs="?", help="input (source) file")
-    parser.add_argument("outfile", nargs="?", help="output (destination) file")
+    parser.add_argument("infile", nargs="?", type=Path, help="input (source) file")
+    parser.add_argument(
+        "outfile", nargs="?", type=Path, help="output (destination) file"
+    )
 
     return parser
 

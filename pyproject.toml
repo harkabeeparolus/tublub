@@ -34,8 +34,15 @@ build-backend = "uv_build"
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-  "COM812", # conflicts with ruff format
-  "D203",   # conflicts with D211
-  "D213",   # conflicts with D212
-  "T20",    # print statements — this is a CLI tool
+  "COM812",  # conflicts with ruff format
+  "D203",    # conflicts with D211
+  "D213",    # conflicts with D212
+  "FIX002",  # TODO comments are intentional
+  "T20",     # print statements — this is a CLI tool
+  "TD002",   # extra TODO stuff we don't use
+  "TD003",   # extra TODO stuff we don't use
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["D104"]
+"tests/**" = ["ANN", "ARG", "D", "INP001", "PLR2004", "RUF059", "S101"]

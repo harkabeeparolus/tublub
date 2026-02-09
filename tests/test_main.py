@@ -1,10 +1,14 @@
 """Tests for tublub.main."""
 
 import sys
+from pathlib import Path
 
 import pytest
 
 from tublub.main import (
+    BINARY_FORMATS,
+    LOAD_EXTRA_ARGS,
+    SAVE_EXTRA_ARGS,
     build_argument_parser,
     export_dataset,
     filter_args,
@@ -14,45 +18,38 @@ from tublub.main import (
     load_dataset_file,
     parse_command_line,
     save_dataset_file,
-    BINARY_FORMATS,
-    LOAD_EXTRA_ARGS,
-    SAVE_EXTRA_ARGS,
 )
-
 
 # --- guess_file_format ---
 
 
 class TestGuessFileFormat:
     def test_csv(self):
-        assert guess_file_format("data.csv") == "csv"
+        assert guess_file_format(Path("data.csv")) == "csv"
 
     def test_json(self):
-        assert guess_file_format("data.json") == "json"
+        assert guess_file_format(Path("data.json")) == "json"
 
     def test_xlsx(self):
-        assert guess_file_format("data.xlsx") == "xlsx"
+        assert guess_file_format(Path("data.xlsx")) == "xlsx"
 
     def test_yaml(self):
-        assert guess_file_format("report.yaml") == "yaml"
+        assert guess_file_format(Path("report.yaml")) == "yaml"
 
     def test_tsv(self):
-        assert guess_file_format("data.tsv") == "tsv"
+        assert guess_file_format(Path("data.tsv")) == "tsv"
 
     def test_unknown_extension(self):
-        assert guess_file_format("data.xyz") is None
+        assert guess_file_format(Path("data.xyz")) is None
 
     def test_no_extension(self):
-        assert guess_file_format("datafile") is None
+        assert guess_file_format(Path("datafile")) is None
 
     def test_none_input(self):
         assert guess_file_format(None) is None
 
-    def test_empty_string(self):
-        assert guess_file_format("") is None
-
     def test_path_with_dirs(self):
-        assert guess_file_format("/some/path/to/file.csv") == "csv"
+        assert guess_file_format(Path("/some/path/to/file.csv")) == "csv"
 
 
 # --- is_bin ---
@@ -130,34 +127,34 @@ class TestGetFormats:
 
 class TestLoadDatasetFile:
     def test_load_csv(self, sample_csv):
-        ds = load_dataset_file(str(sample_csv), extra_args={})
+        ds = load_dataset_file(sample_csv, extra_args={})
         assert len(ds) == 2
         assert ds.headers == ["name", "age", "city"]
 
     def test_load_json(self, sample_json):
-        ds = load_dataset_file(str(sample_json), extra_args={})
+        ds = load_dataset_file(sample_json, extra_args={})
         assert len(ds) == 2
         assert "name" in ds.headers
 
     def test_load_tsv(self, sample_tsv):
-        ds = load_dataset_file(str(sample_tsv), extra_args={})
+        ds = load_dataset_file(sample_tsv, extra_args={})
         assert len(ds) == 2
 
     def test_load_yaml(self, sample_yaml):
-        ds = load_dataset_file(str(sample_yaml), extra_args={})
+        ds = load_dataset_file(sample_yaml, extra_args={})
         assert len(ds) == 2
 
     def test_load_csv_with_skip_lines(self, tmp_path):
         p = tmp_path / "skip.csv"
         p.write_text("# comment\nname,age\nAlice,30\n")
-        ds = load_dataset_file(str(p), extra_args={"skip_lines": 1})
+        ds = load_dataset_file(p, extra_args={"skip_lines": 1})
         assert len(ds) == 1
         assert ds.headers == ["name", "age"]
 
     def test_load_csv_with_delimiter(self, tmp_path):
         p = tmp_path / "semi.csv"
         p.write_text("name;age\nAlice;30\n")
-        ds = load_dataset_file(str(p), extra_args={"delimiter": ";"})
+        ds = load_dataset_file(p, extra_args={"delimiter": ";"})
         assert len(ds) == 1
         assert ds.headers == ["name", "age"]
 
@@ -168,32 +165,32 @@ class TestLoadDatasetFile:
 class TestSaveDatasetFile:
     def test_save_csv(self, sample_data, tmp_path):
         out = tmp_path / "out.csv"
-        save_dataset_file(sample_data, str(out), extra_args={})
+        save_dataset_file(sample_data, out, extra_args={})
         content = out.read_text()
         assert "Alice" in content
         assert "Bob" in content
 
     def test_save_json(self, sample_data, tmp_path):
         out = tmp_path / "out.json"
-        save_dataset_file(sample_data, str(out), extra_args={})
+        save_dataset_file(sample_data, out, extra_args={})
         content = out.read_text()
         assert "Alice" in content
 
     def test_save_yaml(self, sample_data, tmp_path):
         out = tmp_path / "out.yaml"
-        save_dataset_file(sample_data, str(out), extra_args={})
+        save_dataset_file(sample_data, out, extra_args={})
         content = out.read_text()
         assert "Alice" in content
 
     def test_save_unknown_format_exits(self, sample_data, tmp_path):
         out = tmp_path / "out.xyz"
         with pytest.raises(SystemExit):
-            save_dataset_file(sample_data, str(out), extra_args={})
+            save_dataset_file(sample_data, out, extra_args={})
 
     def test_roundtrip_csv(self, sample_data, tmp_path):
         out = tmp_path / "roundtrip.csv"
-        save_dataset_file(sample_data, str(out), extra_args={})
-        loaded = load_dataset_file(str(out), extra_args={})
+        save_dataset_file(sample_data, out, extra_args={})
+        loaded = load_dataset_file(out, extra_args={})
         assert loaded.headers == sample_data.headers
         assert len(loaded) == len(sample_data)
 
@@ -204,7 +201,7 @@ class TestSaveDatasetFile:
 class TestExportDataset:
     def test_export_to_file_handle(self, sample_data, tmp_path):
         out = tmp_path / "export.csv"
-        with open(out, "w", newline="") as fh:
+        with out.open("w", newline="") as fh:
             export_dataset(sample_data, "csv", extra_args={}, file_handle=fh)
         content = out.read_text()
         assert "Alice" in content
@@ -216,7 +213,7 @@ class TestExportDataset:
 
     def test_export_text_to_non_tty(self, sample_data, tmp_path):
         out = tmp_path / "piped.json"
-        with open(out, "w") as fh:
+        with out.open("w") as fh:
             export_dataset(sample_data, "json", extra_args={}, file_handle=fh)
         assert "Alice" in out.read_text()
 
@@ -231,14 +228,14 @@ class TestParseCommandLine:
 
     def test_infile_only(self, sample_csv):
         args, extra = parse_command_line([str(sample_csv)])
-        assert args.infile == str(sample_csv)
+        assert args.infile == sample_csv
         assert args.outfile is None
 
     def test_infile_and_outfile(self, sample_csv, tmp_path):
         out = tmp_path / "out.json"
         args, extra = parse_command_line([str(sample_csv), str(out)])
-        assert args.infile == str(sample_csv)
-        assert args.outfile == str(out)
+        assert args.infile == sample_csv
+        assert args.outfile == out
 
     def test_format_flag(self, sample_csv):
         args, extra = parse_command_line(["-t", "json", str(sample_csv)])
@@ -269,10 +266,11 @@ class TestParseCommandLine:
         assert extra["delimiter"] == ";"
 
     def test_headers_false_not_in_extras_by_default(self, sample_csv):
-        """--no-headers sets headers=False; default (True) is excluded since it's not None."""
+        """Default headers=True is excluded since it's not None."""
         args, extra = parse_command_line([str(sample_csv)])
-        # headers defaults to True but the extra_args logic uses getattr with None default
-        # and filters out None values; True is not None so it gets included
+        # headers defaults to True but the extra_args logic uses
+        # getattr with None default and filters out None values;
+        # True is not None so it gets included
         assert "headers" not in extra or extra.get("headers") is True
 
 
