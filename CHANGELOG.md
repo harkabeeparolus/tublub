@@ -10,10 +10,37 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Added
 
 * All extra format options for importing and exporting Excel, CSV, TSV, and CLI.
+* Stdin pipeline support: read from stdin via `-` argument or implicitly when piped,
+  with auto-detection and `-f`/`--in-format` override.
+* `-f`/`--in-format` flag now works for file inputs too, as an escape hatch for
+  undetectable formats.
+* Fall back to file extension when Tablib content detection fails.
+* Single-column text heuristic for detecting CSV/TSV when `detect_format()` fails
+  (e.g. single-column data where `csv.Sniffer` can't find a delimiter).
+* Test suite with pytest.
+* Type hints on all functions, with mypy and ty as dev dependencies.
 
 ### Changed
 
+* Content-based format detection now tries binary mode first, then text mode,
+  catching lying extensions (e.g. `.xls` files that actually contain CSV).
+* Library functions raise `TublubError` instead of calling `sys.exit()`, making
+  them reusable outside the CLI.
 * Correct handling of `open(..., newline="")` for reading and writing CSV files.
+* Switched build system to uv.
+* Minimum Python version is now 3.10.
+* Use `Path` objects throughout instead of built-in `open()`.
+* Improved command-line help text.
+
+### Fixed
+
+* Binary export to piped stdout now uses `sys.stdout.buffer` instead of crashing.
+* Format detection for extensionless files no longer crashes with
+  `UnicodeDecodeError` on binary files.
+* `--no-headers` and `--no-xlsx-optimize` no longer silently inject default values
+  into format arguments.
+* Fixed `export_dataset()` evaluating `sys.stdout` at definition time instead of
+  call time.
 
 ## [0.3.0] - 2022-07-29
 

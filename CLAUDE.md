@@ -36,6 +36,10 @@ Single-module CLI in `src/tublub/main.py`:
 - `filter_args()` — whitelists extra CLI args per format (defined in `LOAD_EXTRA_ARGS` / `SAVE_EXTRA_ARGS` / `OPEN_EXTRA_ARGS` dicts)
 - `build_argument_parser()` — argparse setup with input/output option groups
 
+## Changelog
+
+Always update `CHANGELOG.md` under the `[Unreleased]` section when making user-facing changes (new features, bug fixes, behavior changes). Follow the [Keep a Changelog](https://keepachangelog.com) format with `Added`, `Changed`, `Fixed`, `Removed` subsections.
+
 ## Conventions
 
 - **Linting:** Ruff with `select = ["ALL"]`. Print statements are allowed (`T20` ignored) since this is a CLI tool.
