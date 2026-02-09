@@ -32,13 +32,13 @@ SAVE_EXTRA_ARGS = {"cli": {"tablefmt"}, "csv": {"delimiter", "quotechar", "diale
 OPEN_EXTRA_ARGS = {"csv": {"newline": ""}}
 
 
-def cli() -> None:
+def cli() -> int:
     """Run the command line interface."""
     args, extra_args = parse_command_line()
 
     if args.list:
         print("Available formats:", " ".join(get_formats()))
-        return
+        return 0
 
     my_data = load_dataset_file(args.infile, extra_args=extra_args)
     if not my_data:
@@ -55,6 +55,8 @@ def cli() -> None:
         export_dataset(my_data, args.out_format, extra_args=extra_args)
     else:
         print(my_data)
+
+    return 0
 
 
 def guess_file_format(filename: str | None = None) -> str | None:
@@ -79,12 +81,14 @@ def load_dataset_file(file_name: str, extra_args: dict[str, Any]) -> tablib.Data
         )
     if detect_format is None:
         detect_format = guess_format
+    if detect_format is None:
+        sys.exit(f"Unable to detect format for: {file_name}")
 
     open_mode = "rb" if is_bin(detect_format) else "r"
-    open_extra = OPEN_EXTRA_ARGS.get(detect_format, {})
+    newline = OPEN_EXTRA_ARGS.get(detect_format, {}).get("newline")
     extra_load_args = filter_args(LOAD_EXTRA_ARGS, extra_args, detect_format)
 
-    with open(file_name, open_mode, **open_extra) as fh:
+    with open(file_name, open_mode, newline=newline) as fh:
         imported_data = tablib.import_set(fh, format=detect_format, **extra_load_args)
 
     return imported_data
@@ -98,11 +102,12 @@ def save_dataset_file(
 ) -> None:
     """Save a Tablib dataset to a file."""
     file_format = force_format or guess_file_format(file_name)
-    if not file_format:
+    if file_format is None:
         sys.exit(f"Unable to detect target file format for: {file_name}")
+        return
 
-    open_extra = OPEN_EXTRA_ARGS.get(file_format, {})
-    with open(file_name, "wb" if is_bin(file_format) else "w", **open_extra) as fh:
+    newline = OPEN_EXTRA_ARGS.get(file_format, {}).get("newline")
+    with open(file_name, "wb" if is_bin(file_format) else "w", newline=newline) as fh:
         export_dataset(data, file_format, extra_args, file_handle=fh)
 
     print(f"Saved '{file_name}', {len(data)} records ({file_format})")
@@ -134,6 +139,8 @@ def filter_args(
     """Create and select keyword arguments for Dataset().load(),
     filtered by input data format.
     """
+    if file_format is None:
+        return {}
     allowed = args_by_format.get(file_format, set())
     return {k: v for k, v in user_args.items() if k in allowed and v is not None}
 
