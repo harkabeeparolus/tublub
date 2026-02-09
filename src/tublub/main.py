@@ -140,10 +140,10 @@ def is_bin(data_format):
     return bool(data_format and data_format in BINARY_FORMATS)
 
 
-def parse_command_line():
+def parse_command_line(argv=None):
     """Parse and return input arguments."""
     parser = build_argument_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     # Sanity checking
 
