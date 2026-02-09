@@ -1,5 +1,14 @@
-[tool.poetry]
-authors = ["Fredrik Mellström <11281108+harkabeeparolus@users.noreply.github.com>"]
+[project]
+name = "tublub"
+version = "0.3.0"
+description = "Convert tabular data files with Tablib."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+  { name = "Fredrik Mellström", email = "11281108+harkabeeparolus@users.noreply.github.com" },
+]
+keywords = ["tablib", "csv", "tsv", "excel", "xlsx"]
 classifiers = [
   "Intended Audience :: Information Technology",
   "Environment :: Console",
@@ -7,30 +16,26 @@ classifiers = [
   "Topic :: Text Processing",
   "Topic :: Utilities",
 ]
-description = "Convert tabular data files with Tablib."
-homepage = "https://github.com/harkabeeparolus/tublub"
-keywords = ["tablib", "csv", "tsv", "excel", "xlsx"]
-license = "MIT"
-name = "tublub"
-readme = "README.md"
-version = "0.3.0"
+dependencies = ["tablib[cli,html,ods,xls,xlsx,yaml]>=3.2.1,<4"]
 
-[tool.poetry.dependencies]
-python = "^3.8"
-tablib = {extras = ["cli", "html", "ods", "xls", "xlsx", "yaml"], version = "^3.2.1"}
+[project.urls]
+Homepage = "https://github.com/harkabeeparolus/tublub"
 
-[tool.poetry.dev-dependencies]
-pytest = "^5.2"
+[project.scripts]
+tublub = "tublub.main:cli"
+
+[dependency-groups]
+dev = ["pytest>=6"]
 
 [build-system]
-build-backend = "poetry.core.masonry.api"
-requires = ["poetry-core>=1.0.0"]
+requires = ["uv_build>=0.10.0,<0.11.0"]
+build-backend = "uv_build"
 
-[tool.poetry.scripts]
-tublub = 'tublub.main:cli'
-
-[tool.black]
-target-version = ['py38']
-
-[tool.isort]
-profile = "black"
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  "COM812", # conflicts with ruff format
+  "D203",   # conflicts with D211
+  "D213",   # conflicts with D212
+  "T20",    # print statements — this is a CLI tool
+]
