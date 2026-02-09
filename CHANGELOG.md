@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-09
+
 ### Added
 
 * All extra format options for importing and exporting Excel, CSV, TSV, and CLI.
