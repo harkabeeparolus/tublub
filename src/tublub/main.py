@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import IO, Any
 
 import tablib
-import tablib.exceptions
 import tablib.formats
 
 from tublub import __version__
@@ -220,6 +219,9 @@ def export_dataset(
             file_handle = sys.stdout.buffer
         else:
             file_handle = sys.stdout
+    if file_handle is None:  # Catch type warning for Pylance
+        msg = "No output stream available for export"
+        raise TublubError(msg)
     extra_save_args = filter_args(SAVE_EXTRA_ARGS, extra_args, target_format)
     output = data.export(target_format, **extra_save_args)
     file_handle.write(output)
