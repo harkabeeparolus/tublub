@@ -28,7 +28,14 @@ grey07,2070,Laura,Grey
 jenkins46,9346,Mary,Jenkins
 johnson81,4081,Craig,Johnson
 smith79,5079,Jamie,Smith
+
+$ tublub -o book.xlsx sales.csv users.json regions.tsv
+Saved 'book.xlsx', 3 sheets (xlsx)
 ```
+
+With `-o`, all positional arguments are inputs. Two or more inputs become
+sheets in a single Databook (XLSX, ODS, JSON, YAML, ...); sheet names default
+to each input file's stem.
 
 ## News and Changes
 

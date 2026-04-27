@@ -4,8 +4,6 @@ If no outfile is specified the result will be printed to STDOUT instead,
 either in the requested output format, or pretty-printed as a table.
 """
 
-# TODO: Multiple input files to single XLSX Databook output
-
 import argparse
 import csv
 import functools
@@ -32,6 +30,10 @@ class FormatConfig:
     load_args: frozenset[str] = frozenset()
     save_args: frozenset[str] = frozenset()
     open_kwargs: dict[str, Any] = field(default_factory=dict)
+
+
+_MIN_DATABOOK_INPUTS = 2  # 2+ inputs → multi-sheet Databook output
+_DASH = Path("-")
 
 
 # https://tablib.readthedocs.io/en/stable/formats.html
@@ -61,6 +63,9 @@ def cli() -> int:
         print("Available formats:", " ".join(get_formats()))
         return 0
 
+    if len(args.infiles) >= _MIN_DATABOOK_INPUTS:
+        return _run_databook(args, extra_args)
+
     try:
         if args.stdin:
             my_data = load_dataset_stdin(
@@ -88,6 +93,30 @@ def cli() -> int:
             export_dataset(my_data, args.out_format, extra_args=extra_args)
         else:
             print(my_data)
+    except TublubError as exc:
+        sys.exit(str(exc))
+
+    return 0
+
+
+def _run_databook(args: argparse.Namespace, extra_args: dict[str, Any]) -> int:
+    """Build a Databook from multiple inputs and save it."""
+    try:
+        book = build_databook(
+            args.infiles, extra_args=extra_args, in_format=args.in_format
+        )
+    except TublubError as exc:
+        sys.exit(str(exc))
+    if book.size == 0:
+        sys.exit("No data was loaded from any input file")
+
+    try:
+        save_databook_file(
+            book,
+            file_name=args.outfile,
+            force_format=args.out_format,
+            extra_args=extra_args,
+        )
     except TublubError as exc:
         sys.exit(str(exc))
 
@@ -224,6 +253,61 @@ def save_dataset_file(
     print(f"Saved '{file_name}', {len(data)} records ({file_format})")
 
 
+def build_databook(
+    paths: list[Path],
+    extra_args: dict[str, Any],
+    in_format: str | None = None,
+) -> tablib.Databook:
+    """Build a Databook from multiple input files, one sheet per file."""
+    titles = _unique_titles(paths)
+    book = tablib.Databook()
+    for path, title in zip(paths, titles, strict=True):
+        ds = load_dataset_file(path, extra_args=extra_args, in_format=in_format)
+        ds.title = title
+        book.add_sheet(ds)
+    return book
+
+
+def save_databook_file(
+    book: tablib.Databook,
+    file_name: Path,
+    extra_args: dict[str, Any],
+    force_format: str | None = None,
+) -> None:
+    """Save a Tablib Databook (multi-sheet workbook) to a file."""
+    file_format = force_format or guess_file_format(file_name)
+    if file_format is None:
+        msg = f"Unable to detect target file format for: {file_name}"
+        raise TublubError(msg)
+
+    cfg = FORMATS.get(file_format, _DEFAULT_FMT)
+    extra_save_args = filter_args("save", extra_args, file_format)
+
+    try:
+        output = book.export(file_format, **extra_save_args)
+    except tablib.UnsupportedFormat as exc:
+        msg = f"Format {file_format!r} does not support multi-sheet (Databook) output"
+        raise TublubError(msg) from exc
+
+    newline = cfg.open_kwargs.get("newline")
+    with file_name.open("wb" if cfg.binary else "w", newline=newline) as fh:
+        fh.write(output)
+
+    print(f"Saved '{file_name}', {book.size} sheets ({file_format})")
+
+
+def _unique_titles(paths: list[Path]) -> list[str]:
+    """Return sheet titles from path stems; suffix duplicates with _2, _3, ..."""
+    counts: dict[str, int] = {}
+    titles: list[str] = []
+    for path in paths:
+        stem = path.stem
+        n = counts.get(stem, 0) + 1
+        counts[stem] = n
+        titles.append(stem if n == 1 else f"{stem}_{n}")
+    return titles
+
+
 def export_dataset(
     data: tablib.Dataset,
     target_format: str,
@@ -296,32 +380,24 @@ def parse_command_line(
     parser = build_argument_parser()
     args = parser.parse_args(argv)
 
-    # Detect stdin mode: explicit "-" or implicit piped stdin
+    infiles, infile, outfile = _reconcile_positionals(parser, args)
+
+    # Stdin handling — only meaningful for single-input mode
     args.stdin = False
-    if args.infile == Path("-"):
-        args.infile = None
+    if len(infiles) >= _MIN_DATABOOK_INPUTS and _DASH in infiles:
+        parser.error("Cannot use stdin '-' with multiple input files")
+    if infile == _DASH:
+        infile = None
+        infiles = []
         args.stdin = True
-    elif not args.infile and not args.list and not sys.stdin.isatty():
+    elif not infiles and not args.list and not sys.stdin.isatty():
         args.stdin = True
 
-    # Sanity checking
+    args.infile = infile
+    args.outfile = outfile
+    args.infiles = infiles
 
-    if args.list and (args.infile or args.outfile):
-        parser.error("Can not combine --list with filename(s)")
-
-    if not args.list and not args.infile and not args.stdin:
-        parser.error("No input data provided.")
-
-    if args.infile and not args.infile.is_file():
-        parser.error(f"Input file {args.infile} does not exist.")
-
-    if args.out_format and args.out_format not in get_formats():
-        parser.error(f"Invalid format {args.out_format}, use one of: {get_formats()}")
-
-    if args.in_format and args.in_format not in get_formats():
-        parser.error(
-            f"Invalid input format {args.in_format}, use one of: {get_formats()}"
-        )
+    _validate_args(parser, args)
 
     # Make a dict of all args.xxx for xxx in the FormatConfig structures
     all_extra_args: set[str] = set()
@@ -334,6 +410,54 @@ def parse_command_line(
     }
 
     return args, extra_args
+
+
+def _reconcile_positionals(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> tuple[list[Path], Path | None, Path | None]:
+    """Map positional inputs + -o into (infiles, infile, outfile).
+
+    Two invocation styles:
+      New: -o OUT INFILE [INFILE ...]   (multi-input → Databook when 2+)
+      Old: INFILE [OUTFILE]             (max two positionals)
+    """
+    raw_inputs: list[Path] = list(args.inputs or [])
+    explicit_output: Path | None = args.output
+
+    if explicit_output is not None:
+        infile = raw_inputs[0] if len(raw_inputs) == 1 else None
+        return list(raw_inputs), infile, explicit_output
+
+    if len(raw_inputs) > _MIN_DATABOOK_INPUTS:
+        parser.error(
+            "Too many positional arguments; "
+            "use -o/--output for multi-input Databook output"
+        )
+    infile = raw_inputs[0] if raw_inputs else None
+    outfile = raw_inputs[1] if len(raw_inputs) >= _MIN_DATABOOK_INPUTS else None
+    infiles: list[Path] = [infile] if infile else []
+    return infiles, infile, outfile
+
+
+def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Validate parsed args; calls parser.error (which exits) on problems."""
+    if args.list and (args.infiles or args.outfile):
+        parser.error("Can not combine --list with filename(s)")
+
+    if not args.list and not args.infiles and not args.stdin:
+        parser.error("No input data provided.")
+
+    for f in args.infiles:
+        if not f.is_file():
+            parser.error(f"Input file {f} does not exist.")
+
+    if args.out_format and args.out_format not in get_formats():
+        parser.error(f"Invalid format {args.out_format}, use one of: {get_formats()}")
+
+    if args.in_format and args.in_format not in get_formats():
+        parser.error(
+            f"Invalid input format {args.in_format}, use one of: {get_formats()}"
+        )
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -402,15 +526,29 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="output format (default: outfile extension, or none)",
     )
     output_group.add_argument(
+        "-o",
+        "--output",
+        metavar="FILE",
+        type=Path,
+        help=(
+            "output file; with multiple inputs, build a multi-sheet "
+            "Databook (e.g. XLSX, ODS, JSON)"
+        ),
+    )
+    output_group.add_argument(
         "--tablefmt",
         help="CLI output; Tabulate table format, e.g. 'fancy_grid'",
     )
 
     parser.add_argument(
-        "infile", nargs="?", type=Path, help="input (source) file, or '-' for stdin"
-    )
-    parser.add_argument(
-        "outfile", nargs="?", type=Path, help="output (destination) file"
+        "inputs",
+        nargs="*",
+        type=Path,
+        metavar="FILE",
+        help=(
+            "input file(s), or '-' for stdin. "
+            "Without -o: [INFILE [OUTFILE]]; with -o: one or more input files"
+        ),
     )
 
     return parser

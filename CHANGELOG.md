@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Added
+
+* Multi-input → single Databook output. Use `-o/--output FILE` with two or more
+  input files to build a multi-sheet workbook (e.g. XLSX, ODS, JSON, YAML).
+  Sheet names default to each input file's stem; duplicate stems get `_2`, `_3`,
+  ... suffixes. Example:
+  `tublub -o book.xlsx sales.csv users.json regions.tsv`
+
 ## [0.4.1] - 2026-02-09
 
 ### Changed

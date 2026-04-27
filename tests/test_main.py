@@ -5,12 +5,16 @@ import sys
 from pathlib import Path
 
 import pytest
+import tablib
 
 from tublub.main import (
     FORMATS,
     TublubError,
     _looks_like_text_lines,
+    _unique_titles,
     build_argument_parser,
+    build_databook,
+    cli,
     export_dataset,
     filter_args,
     get_formats,
@@ -19,6 +23,7 @@ from tublub.main import (
     load_dataset_file,
     load_dataset_stdin,
     parse_command_line,
+    save_databook_file,
     save_dataset_file,
 )
 
@@ -426,3 +431,163 @@ class TestParseCommandLineStdin:
         args, _ = parse_command_line(["-f", "csv", str(sample_csv)])
         assert args.in_format == "csv"
         assert args.stdin is False
+
+
+# --- _unique_titles ---
+
+
+class TestUniqueTitles:
+    def test_distinct_stems(self):
+        paths = [Path("a.csv"), Path("b.json"), Path("c.tsv")]
+        assert _unique_titles(paths) == ["a", "b", "c"]
+
+    def test_collision_suffixes(self):
+        paths = [Path("d1/sales.csv"), Path("d2/sales.csv")]
+        assert _unique_titles(paths) == ["sales", "sales_2"]
+
+    def test_triple_collision(self):
+        paths = [Path("a/x.csv"), Path("b/x.csv"), Path("c/x.csv")]
+        assert _unique_titles(paths) == ["x", "x_2", "x_3"]
+
+    def test_mixed_collisions(self):
+        paths = [
+            Path("a/sales.csv"),
+            Path("users.json"),
+            Path("b/sales.csv"),
+            Path("c/sales.csv"),
+        ]
+        assert _unique_titles(paths) == ["sales", "users", "sales_2", "sales_3"]
+
+    def test_case_preserved(self):
+        paths = [Path("Sales.csv"), Path("dir/Sales.csv")]
+        assert _unique_titles(paths) == ["Sales", "Sales_2"]
+
+    def test_empty(self):
+        assert _unique_titles([]) == []
+
+
+# --- build_databook ---
+
+
+class TestBuildDatabook:
+    def test_two_inputs(self, sample_csv, sample_json):
+        book = build_databook([sample_csv, sample_json], extra_args={})
+        assert book.size == 2
+        assert [s.title for s in book.sheets()] == ["data", "data_2"]
+
+    def test_sheet_data_preserved(self, sample_csv, sample_json):
+        book = build_databook([sample_csv, sample_json], extra_args={})
+        sheets = book.sheets()
+        assert sheets[0].headers == ["name", "age", "city"]
+        assert len(sheets[0]) == 2
+        assert len(sheets[1]) == 2
+
+    def test_distinct_stems(self, tmp_path):
+        a = tmp_path / "sales.csv"
+        a.write_text("name,age\nAlice,30\n")
+        b = tmp_path / "users.csv"
+        b.write_text("name,age\nBob,25\n")
+        book = build_databook([a, b], extra_args={})
+        assert [s.title for s in book.sheets()] == ["sales", "users"]
+
+
+# --- save_databook_file ---
+
+
+class TestSaveDatabookFile:
+    def test_save_xlsx(self, sample_csv, sample_json, tmp_path):
+        out = tmp_path / "book.xlsx"
+        book = build_databook([sample_csv, sample_json], extra_args={})
+        save_databook_file(book, out, extra_args={})
+        assert out.exists()
+        assert out.stat().st_size > 0
+        # Verify it's a real XLSX with two sheets
+        loaded = tablib.Databook().load(out.read_bytes(), format="xlsx")
+        assert loaded.size == 2
+        assert [s.title for s in loaded.sheets()] == ["data", "data_2"]
+
+    def test_save_unsupported_format_raises(self, sample_csv, tmp_path):
+        """CSV doesn't support Databook export — should raise TublubError."""
+        out = tmp_path / "book.csv"
+        book = build_databook([sample_csv, sample_csv], extra_args={})
+        with pytest.raises(TublubError, match="multi-sheet"):
+            save_databook_file(book, out, extra_args={})
+
+    def test_save_unknown_format_raises(self, sample_csv, tmp_path):
+        out = tmp_path / "book.xyz"
+        book = build_databook([sample_csv, sample_csv], extra_args={})
+        with pytest.raises(TublubError, match="Unable to detect"):
+            save_databook_file(book, out, extra_args={})
+
+    def test_force_format_overrides_extension(self, sample_csv, tmp_path):
+        out = tmp_path / "book.bin"
+        book = build_databook([sample_csv, sample_csv], extra_args={})
+        save_databook_file(book, out, extra_args={}, force_format="xlsx")
+        loaded = tablib.Databook().load(out.read_bytes(), format="xlsx")
+        assert loaded.size == 2
+
+
+# --- parse_command_line: multi-input mode ---
+
+
+class TestParseCommandLineMultiInput:
+    def test_o_flag_with_two_inputs(self, sample_csv, sample_json, tmp_path):
+        out = tmp_path / "book.xlsx"
+        args, _ = parse_command_line(
+            ["-o", str(out), str(sample_csv), str(sample_json)]
+        )
+        assert args.infiles == [sample_csv, sample_json]
+        assert args.outfile == out
+        assert args.infile is None
+
+    def test_o_flag_with_single_input(self, sample_csv, tmp_path):
+        """Single input under -o still populates args.infile (single-file path)."""
+        out = tmp_path / "out.json"
+        args, _ = parse_command_line(["-o", str(out), str(sample_csv)])
+        assert args.infiles == [sample_csv]
+        assert args.infile == sample_csv
+        assert args.outfile == out
+
+    def test_three_positionals_without_o_exits(self, sample_csv, tmp_path):
+        out = tmp_path / "out.json"
+        with pytest.raises(SystemExit):
+            parse_command_line([str(sample_csv), str(sample_csv), str(out)])
+
+    def test_stdin_rejected_in_multi_input(self, sample_csv, tmp_path):
+        out = tmp_path / "book.xlsx"
+        with pytest.raises(SystemExit):
+            parse_command_line(["-o", str(out), "-", str(sample_csv)])
+
+    def test_o_with_no_inputs_and_tty_exits(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+        out = tmp_path / "out.json"
+        with pytest.raises(SystemExit):
+            parse_command_line(["-o", str(out)])
+
+    def test_nonexistent_input_in_multi_exits(self, sample_csv, tmp_path):
+        out = tmp_path / "book.xlsx"
+        with pytest.raises(SystemExit):
+            parse_command_line(["-o", str(out), str(sample_csv), "/no/such/file.csv"])
+
+
+# --- cli() integration: multi-input → Databook ---
+
+
+class TestCliDatabook:
+    def test_multi_input_to_xlsx(self, sample_csv, sample_json, tmp_path, monkeypatch):
+        out = tmp_path / "book.xlsx"
+        monkeypatch.setattr(
+            sys, "argv", ["tublub", "-o", str(out), str(sample_csv), str(sample_json)]
+        )
+        rc = cli()
+        assert rc == 0
+        loaded = tablib.Databook().load(out.read_bytes(), format="xlsx")
+        assert loaded.size == 2
+
+    def test_unsupported_output_exits(self, sample_csv, tmp_path, monkeypatch):
+        out = tmp_path / "book.csv"
+        monkeypatch.setattr(
+            sys, "argv", ["tublub", "-o", str(out), str(sample_csv), str(sample_csv)]
+        )
+        with pytest.raises(SystemExit):
+            cli()
