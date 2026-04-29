@@ -665,3 +665,62 @@ class TestCliDatabook:
         )
         with pytest.raises(SystemExit):
             cli()
+
+
+# --- --list-sheets ---
+
+
+class TestListSheets:
+    def test_argparse_flag(self, sample_csv):
+        args, _ = parse_command_line(["--list-sheets", str(sample_csv)])
+        assert args.list_sheets is True
+
+    def test_xlsx_lists_all_sheets(self, multi_sheet_xlsx, capsys, monkeypatch):
+        monkeypatch.setattr(
+            sys, "argv", ["tublub", "--list-sheets", str(multi_sheet_xlsx)]
+        )
+        rc = cli()
+        out = capsys.readouterr().out
+        assert rc == 0
+        lines = out.strip().splitlines()
+        assert len(lines) == 2
+        assert lines[0] == "[0] people  2 rows x 2 cols"
+        assert lines[1] == "[1] cities  2 rows x 2 cols"
+
+    def test_csv_falls_back_to_dataset(self, sample_csv, capsys, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["tublub", "--list-sheets", str(sample_csv)])
+        rc = cli()
+        out = capsys.readouterr().out
+        assert rc == 0
+        lines = out.strip().splitlines()
+        assert len(lines) == 1
+        assert lines[0] == f"[0] {sample_csv.stem}  2 rows x 3 cols"
+
+    def test_unknown_format_exits(self, tmp_path, monkeypatch):
+        bogus = tmp_path / "mystery.xyz"
+        bogus.write_bytes(b"\x00\x01\x02not-a-known-format")
+        monkeypatch.setattr(sys, "argv", ["tublub", "--list-sheets", str(bogus)])
+        with pytest.raises(SystemExit):
+            cli()
+
+    def test_combined_with_output_rejected(self, sample_csv, tmp_path):
+        out = tmp_path / "out.xlsx"
+        with pytest.raises(SystemExit):
+            parse_command_line(["--list-sheets", "-o", str(out), str(sample_csv)])
+
+    def test_combined_with_format_rejected(self, sample_csv):
+        with pytest.raises(SystemExit):
+            parse_command_line(["--list-sheets", "-t", "csv", str(sample_csv)])
+
+    def test_combined_with_list_rejected(self, sample_csv):
+        with pytest.raises(SystemExit):
+            parse_command_line(["--list-sheets", "--list", str(sample_csv)])
+
+    def test_no_input_rejected(self, monkeypatch):
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+        with pytest.raises(SystemExit):
+            parse_command_line(["--list-sheets"])
+
+    def test_two_inputs_rejected(self, sample_csv, sample_json):
+        with pytest.raises(SystemExit):
+            parse_command_line(["--list-sheets", str(sample_csv), str(sample_json)])

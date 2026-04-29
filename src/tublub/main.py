@@ -63,6 +63,9 @@ def cli() -> int:
         print("Available formats:", " ".join(get_formats()))
         return 0
 
+    if args.list_sheets:
+        return _run_list_sheets(args, extra_args)
+
     if len(args.infiles) >= _MIN_DATABOOK_INPUTS:
         return _run_databook(args, extra_args)
 
@@ -96,6 +99,26 @@ def cli() -> int:
     except TublubError as exc:
         sys.exit(str(exc))
 
+    return 0
+
+
+def _run_list_sheets(args: argparse.Namespace, extra_args: dict[str, Any]) -> int:
+    """Print one line per sheet in the input file (title, rows, cols)."""
+    path: Path = args.infile
+    try:
+        book = load_databook_file(path, extra_args=extra_args, in_format=args.in_format)
+        if book is not None:
+            for idx, sheet in enumerate(book.sheets()):
+                ncols = len(sheet.headers or [])
+                print(f"[{idx}] {sheet.title}  {len(sheet)} rows x {ncols} cols")
+        else:
+            ds = load_dataset_file(
+                path, extra_args=extra_args, in_format=args.in_format
+            )
+            ncols = len(ds.headers or [])
+            print(f"[0] {path.stem}  {len(ds)} rows x {ncols} cols")
+    except TublubError as exc:
+        sys.exit(str(exc))
     return 0
 
 
@@ -504,10 +527,31 @@ def _reconcile_positionals(
     return infiles, infile, outfile
 
 
+def _validate_list_sheets(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
+    """Reject flag combinations and input shapes incompatible with --list-sheets."""
+    if args.list:
+        parser.error("Can not combine --list-sheets with --list")
+    if args.outfile:
+        parser.error("Can not combine --list-sheets with -o/--output")
+    if args.out_format:
+        parser.error("Can not combine --list-sheets with -t/--format")
+    if args.stdin:
+        parser.error("--list-sheets does not yet support stdin input")
+    if not args.infiles:
+        parser.error("--list-sheets requires an input file")
+    if len(args.infiles) > 1:
+        parser.error("--list-sheets accepts only one input file")
+
+
 def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     """Validate parsed args; calls parser.error (which exits) on problems."""
     if args.list and (args.infiles or args.outfile):
         parser.error("Can not combine --list with filename(s)")
+
+    if args.list_sheets:
+        _validate_list_sheets(parser, args)
 
     if not args.list and not args.infiles and not args.stdin:
         parser.error("No input data provided.")
@@ -580,6 +624,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         metavar="FMT",
         dest="in_format",
         help="override input format (e.g. for .txt files or undetectable content)",
+    )
+    input_group.add_argument(
+        "--list-sheets",
+        dest="list_sheets",
+        action="store_true",
+        help="list sheets in the input file (title, rows, cols) and exit",
     )
 
     output_group = parser.add_argument_group(title="output options")

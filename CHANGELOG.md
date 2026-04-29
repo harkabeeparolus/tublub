@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   Sheet names default to each input file's stem; duplicate stems get `_2`, `_3`,
   ... suffixes. Example:
   `tublub -o book.xlsx sales.csv users.json regions.tsv`
+* `--list-sheets` flag: print sheet titles with row and column counts for
+  multi-sheet inputs (XLSX, ODS, JSON, YAML), or one line for single-sheet
+  formats. Example: `tublub --list-sheets book.xlsx`
 
 ## [0.4.1] - 2026-02-09
 

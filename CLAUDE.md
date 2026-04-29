@@ -28,3 +28,14 @@ Always update `CHANGELOG.md` under the `[Unreleased]` section when making user-f
 ## Conventions
 
 - Print statements are allowed (`T20` ignored in Ruff config) since this is a CLI tool.
+
+## Ruff gotchas
+
+- RUF001/2/3 flag ambiguous Unicode (e.g. `×`, `−`, `–`) in strings, comments, and docstrings — use ASCII equivalents.
+- C901/PLR0912 cap functions at ~10 cyclomatic / ~12 branches — extract a helper before piling more guards into `_validate_args` or `cli`.
+
+## Testing patterns
+
+- Argparse unit tests: call `parse_command_line(argv)` directly and assert on the returned `args`.
+- CLI integration tests: `monkeypatch.setattr(sys, "argv", [...])`, call `cli()`, read `capsys.readouterr().out`.
+- Rejection tests use `pytest.raises(SystemExit)` since `parser.error()` exits.

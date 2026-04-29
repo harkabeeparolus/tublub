@@ -37,6 +37,17 @@ With `-o`, all positional arguments are inputs. Two or more inputs become
 sheets in a single Databook (XLSX, ODS, JSON, YAML, ...); sheet names default
 to each input file's stem.
 
+To inspect a multi-sheet input without converting it, use `--list-sheets`:
+
+```text
+$ tublub --list-sheets book.xlsx
+[0] people  2 rows x 2 cols
+[1] cities  2 rows x 2 cols
+```
+
+Single-sheet formats (CSV, TSV, ...) print one row, using the file stem
+as the title.
+
 ## News and Changes
 
 Please see the [changelog](CHANGELOG.md) for more details.
