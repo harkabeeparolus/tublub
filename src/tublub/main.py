@@ -136,12 +136,54 @@ def load_dataset_file(
     in_format: str | None = None,
 ) -> tablib.Dataset:
     """Load a file into a Tablib dataset."""
-    # Format resolution priority: explicit -f flag > content detection > extension.
-    # We don't trust extensions alone because legacy web exports commonly use
-    # wrong extensions (e.g. .xls for CSV data). We don't trust detection alone
-    # because tablib's detect_format() relies on csv.Sniffer, which fails on
-    # single-column CSV/TSV (no delimiter to sniff). The -f flag is the escape
-    # hatch for when both fail (e.g. single-column CSV with a .txt extension).
+    fmt = _resolve_input_format(file_name, in_format)
+    cfg = FORMATS.get(fmt, _DEFAULT_FMT)
+    open_mode = "rb" if cfg.binary else "r"
+    newline = cfg.open_kwargs.get("newline")
+    extra_load_args = filter_args("load", extra_args, fmt)
+
+    with file_name.open(open_mode, newline=newline) as fh:
+        return tablib.import_set(fh, format=fmt, **extra_load_args)
+
+
+def load_databook_file(
+    file_name: Path,
+    extra_args: dict[str, Any],
+    in_format: str | None = None,
+) -> tablib.Databook | None:
+    """Try to load a file as a multi-sheet Tablib Databook.
+
+    Returns None when the format does not support multi-sheet input
+    (caller should fall back to load_dataset_file). Mirrors the
+    UnsupportedFormat handling in save_databook_file on the export side
+    so we never need a static "which formats support import_book" table.
+
+    Other tablib errors (corrupt files, structural mismatches) propagate.
+    """
+    fmt = _resolve_input_format(file_name, in_format)
+    cfg = FORMATS.get(fmt, _DEFAULT_FMT)
+    open_mode = "rb" if cfg.binary else "r"
+    newline = cfg.open_kwargs.get("newline")
+    extra_load_args = filter_args("load", extra_args, fmt)
+
+    with file_name.open(open_mode, newline=newline) as fh:
+        payload = fh.read()
+    try:
+        return tablib.Databook().load(payload, format=fmt, **extra_load_args)
+    except tablib.UnsupportedFormat:
+        return None
+
+
+def _resolve_input_format(file_name: Path, in_format: str | None) -> str:
+    """Resolve a file's input format and warn on extension/content mismatch.
+
+    Priority: explicit -f flag > content detection > extension.
+    We don't trust extensions alone because legacy web exports commonly use
+    wrong extensions (e.g. .xls for CSV data). We don't trust detection alone
+    because tablib's detect_format() relies on csv.Sniffer, which fails on
+    single-column CSV/TSV (no delimiter to sniff). The -f flag is the escape
+    hatch for when both fail (e.g. single-column CSV with a .txt extension).
+    """
     detected = detect_format_from_file(file_name)
     guessed = guess_file_format(file_name)
 
@@ -155,14 +197,7 @@ def load_dataset_file(
     if fmt is None:
         msg = f"Unable to detect format for: {file_name}"
         raise TublubError(msg)
-
-    cfg = FORMATS.get(fmt, _DEFAULT_FMT)
-    open_mode = "rb" if cfg.binary else "r"
-    newline = cfg.open_kwargs.get("newline")
-    extra_load_args = filter_args("load", extra_args, fmt)
-
-    with file_name.open(open_mode, newline=newline) as fh:
-        return tablib.import_set(fh, format=fmt, **extra_load_args)
+    return fmt
 
 
 def detect_format_from_file(file_name: Path) -> str | None:
@@ -197,6 +232,37 @@ def load_dataset_stdin(
     in_format: str | None = None, extra_args: dict[str, Any] | None = None
 ) -> tablib.Dataset:
     """Load a dataset from stdin."""
+    raw, fmt, extra_load_args = _read_and_detect_stdin(in_format, extra_args)
+    data = raw if is_bin(fmt) else raw.decode()
+    return tablib.import_set(data, format=fmt, **extra_load_args)
+
+
+def load_databook_stdin(
+    in_format: str | None = None, extra_args: dict[str, Any] | None = None
+) -> tablib.Databook | None:
+    """Try to load a multi-sheet Tablib Databook from stdin.
+
+    Returns None for single-sheet-only formats (caller should fall back
+    to load_dataset_stdin). Mirrors load_databook_file on the file side.
+    Note: stdin can only be consumed once, so callers must choose this
+    helper or load_dataset_stdin per invocation, not both.
+    """
+    raw, fmt, extra_load_args = _read_and_detect_stdin(in_format, extra_args)
+    data = raw if is_bin(fmt) else raw.decode()
+    try:
+        return tablib.Databook().load(data, format=fmt, **extra_load_args)
+    except tablib.UnsupportedFormat:
+        return None
+
+
+def _read_and_detect_stdin(
+    in_format: str | None,
+    extra_args: dict[str, Any] | None,
+) -> tuple[bytes, str, dict[str, Any]]:
+    """Read stdin once, detect its format, and filter load kwargs.
+
+    Returns (raw_bytes, format, filtered_load_kwargs).
+    """
     if extra_args is None:
         extra_args = {}
     raw = sys.stdin.buffer.read()
@@ -204,33 +270,25 @@ def load_dataset_stdin(
         msg = "No data received on stdin"
         raise TublubError(msg)
 
-    detect_format = in_format
-    if detect_format is None:
+    fmt = in_format
+    if fmt is None:
         # Try binary first (detects xlsx, json, yaml, etc.)
-        detect_format = tablib.detect_format(raw)
-        if detect_format is None:
+        fmt = tablib.detect_format(raw)
+        if fmt is None:
             # Fall back to text (detects csv, tsv), then text-lines heuristic
             try:
                 text = raw.decode()
             except UnicodeDecodeError:
                 text = None
             if text is not None:
-                detect_format = tablib.detect_format(text)
-                if detect_format is None and _looks_like_text_lines(text):
-                    detect_format = "tsv"
-    if detect_format is None:
+                fmt = tablib.detect_format(text)
+                if fmt is None and _looks_like_text_lines(text):
+                    fmt = "tsv"
+    if fmt is None:
         msg = "Unable to detect input format from stdin; use -f to specify it"
         raise TublubError(msg)
 
-    extra_load_args = filter_args("load", extra_args, detect_format)
-
-    # Provide data in the right type: str for text formats, bytes for binary
-    if is_bin(detect_format):
-        data = raw
-    else:
-        data = raw.decode() if isinstance(raw, bytes) else raw
-
-    return tablib.import_set(data, format=detect_format, **extra_load_args)
+    return raw, fmt, filter_args("load", extra_args, fmt)
 
 
 def save_dataset_file(

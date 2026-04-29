@@ -52,3 +52,22 @@ def sample_yaml(tmp_path):
         "- {name: Bob, age: 25, city: Gothenburg}\n"
     )
     return p
+
+
+@pytest.fixture
+def multi_sheet_xlsx(tmp_path):
+    """Write a two-sheet XLSX file and return its path."""
+    book = tablib.Databook()
+    people = tablib.Dataset(headers=["name", "age"])
+    people.append(["Alice", 30])
+    people.append(["Bob", 25])
+    people.title = "people"
+    cities = tablib.Dataset(headers=["city", "population"])
+    cities.append(["Stockholm", 975551])
+    cities.append(["Gothenburg", 583056])
+    cities.title = "cities"
+    book.add_sheet(people)
+    book.add_sheet(cities)
+    p = tmp_path / "book.xlsx"
+    p.write_bytes(book.export("xlsx"))
+    return p

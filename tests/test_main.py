@@ -20,6 +20,8 @@ from tublub.main import (
     get_formats,
     guess_file_format,
     is_bin,
+    load_databook_file,
+    load_databook_stdin,
     load_dataset_file,
     load_dataset_stdin,
     parse_command_line,
@@ -525,6 +527,70 @@ class TestSaveDatabookFile:
         save_databook_file(book, out, extra_args={}, force_format="xlsx")
         loaded = tablib.Databook().load(out.read_bytes(), format="xlsx")
         assert loaded.size == 2
+
+
+# --- load_databook_file ---
+
+
+class TestLoadDatabookFile:
+    def test_multi_sheet_xlsx_returns_book(self, multi_sheet_xlsx):
+        book = load_databook_file(multi_sheet_xlsx, extra_args={})
+        assert book is not None
+        assert book.size == 2
+        assert [s.title for s in book.sheets()] == ["people", "cities"]
+
+    def test_csv_returns_none(self, sample_csv):
+        assert load_databook_file(sample_csv, extra_args={}) is None
+
+    def test_tsv_returns_none(self, sample_tsv):
+        assert load_databook_file(sample_tsv, extra_args={}) is None
+
+    def test_malformed_xlsx_propagates_error(self, tmp_path):
+        """Real load errors must propagate, not be swallowed as None."""
+        bad = tmp_path / "bad.xlsx"
+        bad.write_bytes(b"not really an xlsx file")
+        # Underlying error comes from openpyxl/zipfile; we don't pin the
+        # exact type, only that it's not silently None and not TublubError.
+        with pytest.raises(Exception, match=r".+") as exc_info:
+            load_databook_file(bad, extra_args={})
+        assert not isinstance(exc_info.value, TublubError)
+
+    def test_in_format_override(self, multi_sheet_xlsx):
+        book = load_databook_file(multi_sheet_xlsx, extra_args={}, in_format="xlsx")
+        assert book is not None
+        assert book.size == 2
+
+    def test_unknown_format_raises(self, tmp_path):
+        bad = tmp_path / "data.xyz"
+        bad.write_text("nothing")
+        with pytest.raises(TublubError, match="Unable to detect"):
+            load_databook_file(bad, extra_args={})
+
+
+# --- load_databook_stdin ---
+
+
+class TestLoadDatabookStdin:
+    def test_multi_sheet_xlsx_from_stdin(self, multi_sheet_xlsx, monkeypatch):
+        monkeypatch.setattr(
+            sys, "stdin", io.TextIOWrapper(io.BytesIO(multi_sheet_xlsx.read_bytes()))
+        )
+        book = load_databook_stdin()
+        assert book is not None
+        assert book.size == 2
+
+    def test_csv_from_stdin_returns_none(self, monkeypatch):
+        monkeypatch.setattr(
+            sys,
+            "stdin",
+            io.TextIOWrapper(io.BytesIO(b"name,age\nAlice,30\nBob,25\n")),
+        )
+        assert load_databook_stdin() is None
+
+    def test_empty_stdin_raises(self, monkeypatch):
+        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"")))
+        with pytest.raises(TublubError, match="No data"):
+            load_databook_stdin()
 
 
 # --- parse_command_line: multi-input mode ---
