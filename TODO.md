@@ -24,9 +24,15 @@ time tablib gains a new format.
 # pattern, mirroring save_databook_file()
 try:
     book = tablib.Databook().load(payload, format=fmt, **kwargs)
-except tablib.UnsupportedFormat:
+except (tablib.UnsupportedFormat, KeyError, TypeError):
     book = None  # caller treats as single-sheet
 ```
+
+`KeyError`/`TypeError` join `UnsupportedFormat` because tablib raises
+those when a Databook-capable format (json/yaml) holds a single-Dataset
+shape (records list rather than `[{title, data}, ...]`). Both signals
+mean the same thing to us: "not a Databook, fall back to Dataset".
+Genuine load errors (corrupt files, decode failures) still propagate.
 
 ## Behaviour summary
 
@@ -79,13 +85,13 @@ table.
   resolution, open-mode, and newline plumbing.
 - Inside, call `tablib.Databook().load(fh.read(), format=fmt, **kwargs)`
   and return the book on success.
-- Catch `tablib.UnsupportedFormat` (the same exception
-  `save_databook_file()` already catches) and return `None`, signalling
-  to the caller "this format isn't multi-sheet capable; use the existing
-  Dataset path".
-- If tablib raises something else for a nominally-supported format that
-  fails to parse as a Databook, let it propagate as today (don't silently
-  swallow real errors).
+- Catch `(tablib.UnsupportedFormat, KeyError, TypeError)` and return
+  `None`, signalling to the caller "this isn't a Databook; use the
+  existing Dataset path". `UnsupportedFormat` covers format-level
+  capability (csv/tsv/dbf/...); `KeyError`/`TypeError` cover shape
+  mismatches inside json/yaml (records-style content).
+- Genuine load errors (corrupt binary files, decode failures, etc.)
+  must still propagate — don't swallow real errors.
 - Add a thin `load_databook_stdin(...)` counterpart that mirrors the
   existing `load_dataset_stdin()` plumbing.
 - The existing `load_dataset_file()` stays as the single-sheet path. New

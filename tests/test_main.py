@@ -545,6 +545,14 @@ class TestLoadDatabookFile:
     def test_tsv_returns_none(self, sample_tsv):
         assert load_databook_file(sample_tsv, extra_args={}) is None
 
+    def test_records_json_returns_none(self, sample_json):
+        """JSON of records (single-Dataset shape) is not a Databook."""
+        assert load_databook_file(sample_json, extra_args={}) is None
+
+    def test_records_yaml_returns_none(self, sample_yaml):
+        """YAML of records (single-Dataset shape) is not a Databook."""
+        assert load_databook_file(sample_yaml, extra_args={}) is None
+
     def test_malformed_xlsx_propagates_error(self, tmp_path):
         """Real load errors must propagate, not be swallowed as None."""
         bad = tmp_path / "bad.xlsx"

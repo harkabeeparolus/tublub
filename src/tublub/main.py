@@ -153,12 +153,18 @@ def load_databook_file(
 ) -> tablib.Databook | None:
     """Try to load a file as a multi-sheet Tablib Databook.
 
-    Returns None when the format does not support multi-sheet input
-    (caller should fall back to load_dataset_file). Mirrors the
-    UnsupportedFormat handling in save_databook_file on the export side
-    so we never need a static "which formats support import_book" table.
+    Returns None when the input is not a Databook — either because the
+    format doesn't support multi-sheet input at all (csv/tsv/dbf/...) or
+    because a Databook-capable format (json/yaml) holds a single-Dataset
+    shape (records list rather than [{title, data}, ...]). The caller
+    should fall back to load_dataset_file in both cases.
 
-    Other tablib errors (corrupt files, structural mismatches) propagate.
+    Mirrors the UnsupportedFormat handling in save_databook_file on the
+    export side so we never need a static "which formats support
+    import_book" table. KeyError/TypeError are caught alongside it
+    because tablib raises those for shape mismatches inside json/yaml.
+
+    Genuine load errors (corrupt files, decode failures) still propagate.
     """
     fmt = _resolve_input_format(file_name, in_format)
     cfg = FORMATS.get(fmt, _DEFAULT_FMT)
@@ -170,7 +176,7 @@ def load_databook_file(
         payload = fh.read()
     try:
         return tablib.Databook().load(payload, format=fmt, **extra_load_args)
-    except tablib.UnsupportedFormat:
+    except (tablib.UnsupportedFormat, KeyError, TypeError):
         return None
 
 
@@ -242,16 +248,17 @@ def load_databook_stdin(
 ) -> tablib.Databook | None:
     """Try to load a multi-sheet Tablib Databook from stdin.
 
-    Returns None for single-sheet-only formats (caller should fall back
-    to load_dataset_stdin). Mirrors load_databook_file on the file side.
-    Note: stdin can only be consumed once, so callers must choose this
-    helper or load_dataset_stdin per invocation, not both.
+    Returns None when the input is not a Databook (caller should fall
+    back to load_dataset_stdin). Mirrors load_databook_file on the file
+    side; see that docstring for the catch policy. Note: stdin can only
+    be consumed once, so callers must choose this helper or
+    load_dataset_stdin per invocation, not both.
     """
     raw, fmt, extra_load_args = _read_and_detect_stdin(in_format, extra_args)
     data = raw if is_bin(fmt) else raw.decode()
     try:
         return tablib.Databook().load(data, format=fmt, **extra_load_args)
-    except tablib.UnsupportedFormat:
+    except (tablib.UnsupportedFormat, KeyError, TypeError):
         return None
 
 
