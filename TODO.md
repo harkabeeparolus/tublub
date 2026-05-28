@@ -1,5 +1,10 @@
 # TODO — multi-sheet input support
 
+> See also `CODE_REVIEW.md` for orthogonal pre-release polish/refactor
+> items (CR-A1 .. CR-F3). Some overlap with this roadmap is noted there
+> inline; resolve the cross-referenced architecture items (CR-A1 .. A3)
+> before TODO 3+ land where possible.
+
 A staged plan for extending tublub so a single input file with multiple
 sheets (XLSX/ODS/XLS/JSON/YAML) can be inspected, displayed, and converted.
 

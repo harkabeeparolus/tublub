@@ -8,6 +8,7 @@ import argparse
 import csv
 import functools
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any
@@ -76,12 +77,12 @@ def cli() -> int:
             )
         else:
             my_data = load_dataset_file(
-                args.infile, extra_args=extra_args, in_format=args.in_format
+                args.infiles[0], extra_args=extra_args, in_format=args.in_format
             )
     except TublubError as exc:
         sys.exit(str(exc))
     if not my_data:
-        source = "stdin" if args.stdin else str(args.infile)
+        source = "stdin" if args.stdin else str(args.infiles[0])
         sys.exit(f"No data was loaded from {source}")
 
     try:
@@ -104,21 +105,18 @@ def cli() -> int:
 
 def _run_list_sheets(args: argparse.Namespace, extra_args: dict[str, Any]) -> int:
     """Print one line per sheet in the input file (title, rows, cols)."""
-    path: Path = args.infile
+    path: Path = args.infiles[0]
     try:
-        book = load_databook_file(path, extra_args=extra_args, in_format=args.in_format)
-        if book is not None:
-            for idx, sheet in enumerate(book.sheets()):
-                ncols = len(sheet.headers or [])
-                print(f"[{idx}] {sheet.title}  {len(sheet)} rows x {ncols} cols")
-        else:
-            ds = load_dataset_file(
-                path, extra_args=extra_args, in_format=args.in_format
-            )
-            ncols = len(ds.headers or [])
-            print(f"[0] {path.stem}  {len(ds)} rows x {ncols} cols")
+        loaded = try_load_file(path, extra_args=extra_args, in_format=args.in_format)
     except TublubError as exc:
         sys.exit(str(exc))
+    if isinstance(loaded, tablib.Databook):
+        for idx, sheet in enumerate(loaded.sheets()):
+            ncols = len(sheet.headers or [])
+            print(f"[{idx}] {sheet.title}  {len(sheet)} rows x {ncols} cols")
+    else:
+        ncols = len(loaded.headers or [])
+        print(f"[0] {path.stem}  {len(loaded)} rows x {ncols} cols")
     return 0
 
 
@@ -285,6 +283,40 @@ def load_databook_stdin(
         return None
 
 
+def try_load_file(
+    file_name: Path,
+    extra_args: dict[str, Any],
+    in_format: str | None = None,
+) -> tablib.Databook | tablib.Dataset:
+    """Load a file, returning a Databook when possible, else a Dataset.
+
+    Encapsulates the "try Databook, fall back to Dataset" handshake so
+    callers don't reimplement it.
+    """
+    book = load_databook_file(file_name, extra_args=extra_args, in_format=in_format)
+    if book is not None:
+        return book
+    return load_dataset_file(file_name, extra_args=extra_args, in_format=in_format)
+
+
+def try_load_stdin(
+    in_format: str | None = None,
+    extra_args: dict[str, Any] | None = None,
+) -> tablib.Databook | tablib.Dataset:
+    """Load stdin, returning a Databook when possible, else a Dataset.
+
+    Reads stdin once and tries both interpretations on the same bytes,
+    so callers don't need to choose load_databook_stdin vs
+    load_dataset_stdin up front (stdin can only be consumed once).
+    """
+    raw, fmt, extra_load_args = _read_and_detect_stdin(in_format, extra_args)
+    data = raw if is_bin(fmt) else raw.decode()
+    try:
+        return tablib.Databook().load(data, format=fmt, **extra_load_args)
+    except (tablib.UnsupportedFormat, KeyError, TypeError):
+        return tablib.import_set(data, format=fmt, **extra_load_args)
+
+
 def _read_and_detect_stdin(
     in_format: str | None,
     extra_args: dict[str, Any] | None,
@@ -385,14 +417,35 @@ def save_databook_file(
 
 
 def _unique_titles(paths: list[Path]) -> list[str]:
-    """Return sheet titles from path stems; suffix duplicates with _2, _3, ..."""
-    counts: dict[str, int] = {}
+    """Return sheet titles from path stems; disambiguate stem collisions.
+
+    On stem collision (data/a.csv + backup/a.csv) the parent directory
+    qualifies the title (data_a, backup_a). Underscore is used because
+    XLSX sheet titles forbid the characters slash, backslash, question
+    mark, asterisk, and brackets. If the parent-qualified
+    title also collides (same parent name twice in the input list), or
+    a path has no parent name, the existing _2/_3 numeric suffix kicks
+    in on top. A stderr note is emitted whenever any disambiguation
+    happens so users notice that the workbook's sheet names don't match
+    the input stems verbatim.
+    """
+    stem_counts = Counter(p.stem for p in paths)
     titles: list[str] = []
+    seen: dict[str, int] = {}
     for path in paths:
         stem = path.stem
-        n = counts.get(stem, 0) + 1
-        counts[stem] = n
-        titles.append(stem if n == 1 else f"{stem}_{n}")
+        if stem_counts[stem] > 1 and path.parent.name:
+            base = f"{path.parent.name}_{stem}"
+        else:
+            base = stem
+        n = seen.get(base, 0) + 1
+        seen[base] = n
+        titles.append(base if n == 1 else f"{base}_{n}")
+    if any(t != p.stem for t, p in zip(titles, paths, strict=True)):
+        print(
+            "Note: sheet titles disambiguated due to filename collisions",
+            file=sys.stderr,
+        )
     return titles
 
 
@@ -468,20 +521,18 @@ def parse_command_line(
     parser = build_argument_parser()
     args = parser.parse_args(argv)
 
-    infiles, infile, outfile = _reconcile_positionals(parser, args)
+    infiles, outfile = _reconcile_positionals(parser, args)
 
     # Stdin handling — only meaningful for single-input mode
     args.stdin = False
     if len(infiles) >= _MIN_DATABOOK_INPUTS and _DASH in infiles:
         parser.error("Cannot use stdin '-' with multiple input files")
-    if infile == _DASH:
-        infile = None
+    if infiles == [_DASH]:
         infiles = []
         args.stdin = True
     elif not infiles and not args.list and not sys.stdin.isatty():
         args.stdin = True
 
-    args.infile = infile
     args.outfile = outfile
     args.infiles = infiles
 
@@ -502,8 +553,8 @@ def parse_command_line(
 
 def _reconcile_positionals(
     parser: argparse.ArgumentParser, args: argparse.Namespace
-) -> tuple[list[Path], Path | None, Path | None]:
-    """Map positional inputs + -o into (infiles, infile, outfile).
+) -> tuple[list[Path], Path | None]:
+    """Map positional inputs + -o into (infiles, outfile).
 
     Two invocation styles:
       New: -o OUT INFILE [INFILE ...]   (multi-input → Databook when 2+)
@@ -513,18 +564,16 @@ def _reconcile_positionals(
     explicit_output: Path | None = args.output
 
     if explicit_output is not None:
-        infile = raw_inputs[0] if len(raw_inputs) == 1 else None
-        return list(raw_inputs), infile, explicit_output
+        return list(raw_inputs), explicit_output
 
     if len(raw_inputs) > _MIN_DATABOOK_INPUTS:
         parser.error(
             "Too many positional arguments; "
             "use -o/--output for multi-input Databook output"
         )
-    infile = raw_inputs[0] if raw_inputs else None
+    infiles: list[Path] = [raw_inputs[0]] if raw_inputs else []
     outfile = raw_inputs[1] if len(raw_inputs) >= _MIN_DATABOOK_INPUTS else None
-    infiles: list[Path] = [infile] if infile else []
-    return infiles, infile, outfile
+    return infiles, outfile
 
 
 def _validate_list_sheets(

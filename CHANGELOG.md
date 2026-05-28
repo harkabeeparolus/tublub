@@ -11,12 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 * Multi-input → single Databook output. Use `-o/--output FILE` with two or more
   input files to build a multi-sheet workbook (e.g. XLSX, ODS, JSON, YAML).
-  Sheet names default to each input file's stem; duplicate stems get `_2`, `_3`,
-  ... suffixes. Example:
+  Sheet names default to each input file's stem; on collisions the parent
+  directory name qualifies the title (e.g. `data/a.csv` and `backup/a.csv`
+  become `data_a` and `backup_a`), with `_2`, `_3`, ... suffixes as a final
+  fallback. Example:
   `tublub -o book.xlsx sales.csv users.json regions.tsv`
 * `--list-sheets` flag: print sheet titles with row and column counts for
   multi-sheet inputs (XLSX, ODS, JSON, YAML), or one line for single-sheet
   formats. Example: `tublub --list-sheets book.xlsx`
+
+### Changed
+
+* Sheet-title disambiguation for multi-input Databook output now prefers the
+  parent directory name over a numeric suffix when input stems collide, and
+  prints a stderr note when disambiguation happens.
 
 ## [0.4.1] - 2026-02-09
 

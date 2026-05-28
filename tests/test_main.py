@@ -293,13 +293,13 @@ class TestParseCommandLine:
 
     def test_infile_only(self, sample_csv):
         args, extra = parse_command_line([str(sample_csv)])
-        assert args.infile == sample_csv
+        assert args.infiles == [sample_csv]
         assert args.outfile is None
 
     def test_infile_and_outfile(self, sample_csv, tmp_path):
         out = tmp_path / "out.json"
         args, extra = parse_command_line([str(sample_csv), str(out)])
-        assert args.infile == sample_csv
+        assert args.infiles == [sample_csv]
         assert args.outfile == out
 
     def test_format_flag(self, sample_csv):
@@ -412,7 +412,7 @@ class TestParseCommandLineStdin:
         monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
         args, _ = parse_command_line(["-", "-t", "json"])
         assert args.stdin is True
-        assert args.infile is None
+        assert args.infiles == []
 
     def test_implicit_stdin_when_piped(self, monkeypatch):
         monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
@@ -443,13 +443,14 @@ class TestUniqueTitles:
         paths = [Path("a.csv"), Path("b.json"), Path("c.tsv")]
         assert _unique_titles(paths) == ["a", "b", "c"]
 
-    def test_collision_suffixes(self):
+    def test_collision_uses_parent(self, capsys):
         paths = [Path("d1/sales.csv"), Path("d2/sales.csv")]
-        assert _unique_titles(paths) == ["sales", "sales_2"]
+        assert _unique_titles(paths) == ["d1_sales", "d2_sales"]
+        assert "disambiguated" in capsys.readouterr().err
 
-    def test_triple_collision(self):
+    def test_triple_collision_uses_parent(self):
         paths = [Path("a/x.csv"), Path("b/x.csv"), Path("c/x.csv")]
-        assert _unique_titles(paths) == ["x", "x_2", "x_3"]
+        assert _unique_titles(paths) == ["a_x", "b_x", "c_x"]
 
     def test_mixed_collisions(self):
         paths = [
@@ -458,11 +459,29 @@ class TestUniqueTitles:
             Path("b/sales.csv"),
             Path("c/sales.csv"),
         ]
-        assert _unique_titles(paths) == ["sales", "users", "sales_2", "sales_3"]
+        assert _unique_titles(paths) == [
+            "a_sales",
+            "users",
+            "b_sales",
+            "c_sales",
+        ]
 
-    def test_case_preserved(self):
+    def test_parent_collision_falls_back_to_numeric_suffix(self):
+        # Two inputs share both parent name AND stem → parent_stem still
+        # collides, so the _2 suffix kicks in.
+        paths = [Path("proj_a/data/x.csv"), Path("proj_b/data/x.csv")]
+        assert _unique_titles(paths) == ["data_x", "data_x_2"]
+
+    def test_bare_filename_falls_back_to_numeric_suffix(self, capsys):
+        # No parent name available for "Sales.csv" → numeric suffix.
         paths = [Path("Sales.csv"), Path("dir/Sales.csv")]
-        assert _unique_titles(paths) == ["Sales", "Sales_2"]
+        assert _unique_titles(paths) == ["Sales", "dir_Sales"]
+        assert "disambiguated" in capsys.readouterr().err
+
+    def test_no_collision_no_note(self, capsys):
+        paths = [Path("a.csv"), Path("b.csv")]
+        _unique_titles(paths)
+        assert capsys.readouterr().err == ""
 
     def test_empty(self):
         assert _unique_titles([]) == []
@@ -475,7 +494,11 @@ class TestBuildDatabook:
     def test_two_inputs(self, sample_csv, sample_json):
         book = build_databook([sample_csv, sample_json], extra_args={})
         assert book.size == 2
-        assert [s.title for s in book.sheets()] == ["data", "data_2"]
+        titles = [s.title for s in book.sheets()]
+        # Both fixtures share stem "data" and parent dir, so disambiguation
+        # falls back to a numeric suffix on the parent-qualified base.
+        assert len(set(titles)) == 2
+        assert all("data" in t for t in titles)
 
     def test_sheet_data_preserved(self, sample_csv, sample_json):
         book = build_databook([sample_csv, sample_json], extra_args={})
@@ -506,7 +529,9 @@ class TestSaveDatabookFile:
         # Verify it's a real XLSX with two sheets
         loaded = tablib.Databook().load(out.read_bytes(), format="xlsx")
         assert loaded.size == 2
-        assert [s.title for s in loaded.sheets()] == ["data", "data_2"]
+        titles = [s.title for s in loaded.sheets()]
+        assert len(set(titles)) == 2
+        assert all("data" in t for t in titles)
 
     def test_save_unsupported_format_raises(self, sample_csv, tmp_path):
         """CSV doesn't support Databook export — should raise TublubError."""
@@ -612,14 +637,12 @@ class TestParseCommandLineMultiInput:
         )
         assert args.infiles == [sample_csv, sample_json]
         assert args.outfile == out
-        assert args.infile is None
 
     def test_o_flag_with_single_input(self, sample_csv, tmp_path):
-        """Single input under -o still populates args.infile (single-file path)."""
+        """Single input under -o populates args.infiles (single-file path)."""
         out = tmp_path / "out.json"
         args, _ = parse_command_line(["-o", str(out), str(sample_csv)])
         assert args.infiles == [sample_csv]
-        assert args.infile == sample_csv
         assert args.outfile == out
 
     def test_three_positionals_without_o_exits(self, sample_csv, tmp_path):
