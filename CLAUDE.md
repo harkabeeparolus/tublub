@@ -15,7 +15,7 @@ just lint       # ruff check --fix + ruff format
 just typecheck  # mypy + ty
 just test       # pytest
 just check      # all of the above
-just run -- ARGS  # run the CLI from the dev checkout, e.g. `just run -- --list`
+just run ARGS  # run the CLI from the dev checkout, e.g. `just run --list`
 ```
 
 ## Architecture
@@ -40,7 +40,7 @@ Always update `CHANGELOG.md` under the `[Unreleased]` section when making user-f
 
 - RUF001/2/3 flag ambiguous Unicode (e.g. `×`, `−`, `–`) in strings, comments, and docstrings — use ASCII equivalents.
 - C901/PLR0912 cap functions at ~10 cyclomatic / ~12 branches — extract a helper before piling more guards into `_validate_args` or `cli`.
-- S101 forbids `assert` in `src/` (tests get it via per-file-ignores). For type narrowing, use an explicit `if x is None: raise TublubError(...)` instead.
+- S101 forbids `assert` in `src/` (tests get it via per-file-ignores). For type narrowing, use an explicit `if x is None: raise TublubError(...)` instead, or extract a helper whose return type is already narrow (see `_default_export_handle`) rather than reaching for `typing.cast`.
 - D301 rejects backslashes in docstrings — spell out characters (e.g. "backslash") or prefix the docstring with `r"""`.
 
 ## Testing patterns

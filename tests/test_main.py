@@ -27,6 +27,7 @@ from tublub.main import (
     parse_command_line,
     save_databook_file,
     save_dataset_file,
+    try_load_file,
 )
 
 # --- guess_file_format ---
@@ -598,6 +599,24 @@ class TestLoadDatabookFile:
         bad.write_text("nothing")
         with pytest.raises(TublubError, match="Unable to detect"):
             load_databook_file(bad, extra_args={})
+
+    def test_broken_json_syntax_propagates(self, tmp_path):
+        """The (UnsupportedFormat, KeyError, TypeError) catch must not swallow
+        a JSONDecodeError from a syntactically broken JSON file."""
+        bad = tmp_path / "broken.json"
+        bad.write_bytes(b'{"foo":')
+        with pytest.raises(Exception, match=r".+") as exc_info:
+            try_load_file(bad, extra_args={})
+        assert not isinstance(exc_info.value, TublubError)
+        assert isinstance(exc_info.value, ValueError)  # JSONDecodeError
+
+    def test_tablib_hostile_json_shape_propagates(self, tmp_path):
+        """JSON valid as syntax but not a Dataset or Databook shape must
+        surface as an error (UnsupportedFormat), not silently fall back."""
+        bad = tmp_path / "weird.json"
+        bad.write_bytes(b'{"random": "object"}')
+        with pytest.raises(tablib.UnsupportedFormat):
+            try_load_file(bad, extra_args={})
 
 
 # --- load_databook_stdin ---

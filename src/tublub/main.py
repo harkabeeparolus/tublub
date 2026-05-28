@@ -63,13 +63,15 @@ def cli() -> int:
     if args.list:
         print("Available formats:", " ".join(get_formats()))
         return 0
-
     if args.list_sheets:
         return _run_list_sheets(args, extra_args)
-
     if len(args.infiles) >= _MIN_DATABOOK_INPUTS:
         return _run_databook(args, extra_args)
+    return _run_single(args, extra_args)
 
+
+def _run_single(args: argparse.Namespace, extra_args: dict[str, Any]) -> int:
+    """Load one input (file or stdin) as a Dataset and render it."""
     try:
         if args.stdin:
             my_data = load_dataset_stdin(
@@ -457,19 +459,20 @@ def export_dataset(
 ) -> None:
     """Export dataset to a file handle or other stream."""
     if file_handle is None:
-        if is_bin(target_format):
-            if sys.stdout.isatty():
-                msg = f"Format {target_format} is binary, not printing to console!"
-                raise TublubError(msg)
-            file_handle = sys.stdout.buffer
-        else:
-            file_handle = sys.stdout
-    if file_handle is None:  # Catch type warning for Pylance
-        msg = "No output stream available for export"
-        raise TublubError(msg)
+        file_handle = _default_export_handle(target_format)
     extra_save_args = filter_args("save", extra_args, target_format)
     output = data.export(target_format, **extra_save_args)
     file_handle.write(output)
+
+
+def _default_export_handle(target_format: str) -> IO[str] | IO[bytes]:
+    """Pick a stdout stream for the format, or raise for binary-to-TTY."""
+    if is_bin(target_format):
+        if sys.stdout.isatty():
+            msg = f"Format {target_format} is binary, not printing to console!"
+            raise TublubError(msg)
+        return sys.stdout.buffer
+    return sys.stdout
 
 
 def filter_args(
