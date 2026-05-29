@@ -1,9 +1,8 @@
 # TODO — multi-sheet input support
 
-> See also `CODE_REVIEW.md` for orthogonal pre-release polish/refactor
-> items (CR-A1 .. CR-F3). Some overlap with this roadmap is noted there
-> inline; resolve the cross-referenced architecture items (CR-A1 .. A3)
-> before TODO 3+ land where possible.
+> See [`design.md`](design.md) for the architecture and principles this
+> roadmap builds on, and [`decisions.md`](decisions.md) for the pre-release
+> review decisions (the former CODE_REVIEW.md findings, now resolved).
 
 A staged plan for extending tublub so a single input file with multiple
 sheets (XLSX/ODS/XLS/JSON/YAML) can be inspected, displayed, and converted.
@@ -17,13 +16,11 @@ Work the items in order — later ones depend on earlier helpers.
 
 ## Don't hard-code a Tablib capability matrix
 
-Mirror the pattern already used in `save_databook_file()`: attempt the
-Databook operation and catch `tablib.UnsupportedFormat` (or whatever
-tablib raises for parse failure on a nominally-supported format), then
-fall back to single-sheet handling. No `databook: bool` field on
-`FormatConfig`, no static "which formats support import_book" table —
-those would drift from upstream and force us to update tublub every
-time tablib gains a new format.
+The guiding principle and its rationale now live in
+[`design.md` § No static Tablib capability matrix](design.md#no-static-tablib-capability-matrix)
+and [`decisions.md` 002](decisions.md). In short: discover capability by
+attempting the Databook operation and catching failure, never by a static
+table. The actionable pattern for the items below:
 
 ```python
 # pattern, mirroring save_databook_file()
@@ -32,12 +29,6 @@ try:
 except (tablib.UnsupportedFormat, KeyError, TypeError):
     book = None  # caller treats as single-sheet
 ```
-
-`KeyError`/`TypeError` join `UnsupportedFormat` because tablib raises
-those when a Databook-capable format (json/yaml) holds a single-Dataset
-shape (records list rather than `[{title, data}, ...]`). Both signals
-mean the same thing to us: "not a Databook, fall back to Dataset".
-Genuine load errors (corrupt files, decode failures) still propagate.
 
 ## Behaviour summary
 

@@ -25,6 +25,12 @@ Per-format behavior (binary?, newline, allowed load/save kwargs) lives in the
 `FORMATS` dict — adding or tweaking a format means editing that entry, not
 sprinkling conditionals through the loaders.
 
+For the design rationale (detection policy, Dataset-vs-Databook split, the
+"no static capability matrix" principle, error boundary) read `docs/design.md`
+and the decision log in `docs/decisions.md` *before* changing format detection,
+error handling, or the load/save split. `docs/TODO.md` is the multi-sheet
+feature roadmap.
+
 ## Changelog
 
 Always update `CHANGELOG.md` under the `[Unreleased]` section when making user-facing changes (new features, bug fixes, behavior changes). Follow the [Keep a Changelog](https://keepachangelog.com) format with `Added`, `Changed`, `Fixed`, `Removed` subsections.

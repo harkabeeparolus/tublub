@@ -1,0 +1,114 @@
+# tublub — design
+
+The durable "how it's built and why" for tublub. Read this before changing
+format detection, error handling, or the Dataset/Databook split. For the
+record of specific calls (and their dates/rationale), see
+[`decisions.md`](decisions.md). For the multi-sheet feature roadmap, see
+[`TODO.md`](TODO.md). This doc is living — revise it as the design
+evolves; `decisions.md` is append-only.
+
+## What tublub is
+
+A thin CLI wrapper over [Tablib](https://tablib.readthedocs.io) that converts
+and views tabular data between formats (CSV, TSV, JSON, YAML, XLSX, XLS, ODS,
+DBF, and Tablib's export-only formats).
+
+**Design philosophy: don't reimplement Tablib.** tublub adds a command-line
+surface, format detection, and ergonomics; Tablib owns the actual parsing,
+serialization, and the set of supported formats. Wherever a choice is between
+"teach tublub about formats" and "ask Tablib and react", we ask Tablib (see
+*No static capability matrix* below).
+
+## Module layout
+
+Single module: `src/tublub/main.py`. Entry point `tublub.main:cli`. The flow
+is layered:
+
+1. **Parse + validate** — `parse_command_line` builds the argparse parser,
+   reconciles positionals, resolves stdin, validates, and collects
+   format-specific kwargs (`_collect_extra_args`).
+2. **Dispatch** — `cli()` is a flat switch over modes, one `_run_*` per mode
+   (see *Dispatch model*).
+3. **Load / save helpers** — `load_*`/`save_*`/`try_load_*`, all built on the
+   `FORMATS` table.
+4. **Tablib** — does the real work.
+
+## Core abstractions
+
+### The `FORMATS` table
+`FORMATS: dict[str, FormatConfig]` is the single source of per-format
+behavior: `binary?`, allowed load/save kwargs, and open kwargs (only CSV sets
+a non-default `newline`). **Adding or tweaking a format means editing one
+entry**, not sprinkling conditionals through the loaders. `filter_args` and
+`_open_for_format` both read from it so call sites never branch on format
+themselves.
+
+There is deliberately **no `databook: bool` capability flag** — see below.
+
+### The `TublubError` boundary
+Library helpers raise `TublubError` for user-facing problems; only the
+`_run_*` entry points (called by `cli()`) catch it and convert to
+`sys.exit(msg)`. This keeps every helper reusable outside the CLI. For type
+narrowing, prefer an explicit `if x is None: raise TublubError(...)` or a
+helper with an already-narrow return type over `assert`/`cast` (S101 forbids
+`assert` in `src/`).
+
+### Dataset vs Databook
+A single sheet is a `tablib.Dataset`; a multi-sheet workbook is a
+`tablib.Databook`. Most load/save operations have both flavours. The
+`try_load_file` / `try_load_stdin` helpers encapsulate the **"try Databook,
+fall back to Dataset"** handshake so call sites don't reimplement it (stdin
+in particular can only be read once, so the stdin variant tries both
+interpretations on the same bytes).
+
+### Input state
+`args.infiles: list[Path]` and `args.stdin: bool` are the **only** input-state
+truth. There is no separate `args.infile` or `InputSpec` wrapper. Stdin is
+inferred in `parse_command_line` (explicit `-`, or no inputs piped into a
+non-TTY — see `_should_use_implicit_stdin`).
+
+## Key design principles
+
+### No static Tablib capability matrix
+Discover what a format can do by **attempting the operation and catching the
+failure**, never by consulting a hard-coded table. `save_databook_file`
+attempts `book.export(fmt)` and catches `tablib.UnsupportedFormat`;
+`load_databook_*` attempts `Databook().load(...)` and catches
+`(UnsupportedFormat, KeyError, TypeError)`, returning `None` to mean "not a
+Databook, use the Dataset path". `KeyError`/`TypeError` are included because
+Tablib raises them when a Databook-capable format (JSON/YAML) holds a
+single-Dataset shape (a records list rather than `[{title, data}, ...]`).
+
+**Why:** a static `{format: supports_databook}` table would drift from
+upstream and force a tublub change every time Tablib gains a format. Genuine
+load errors (corrupt files, decode failures) still propagate — the broad
+catch is scoped to the capability question, not to swallowing real errors.
+
+### Content over extension for input detection
+Input format is resolved with the priority **`-f` flag > content detection >
+extension** (`_resolve_input_format`). On an extension/content mismatch tublub
+**warns to stderr and proceeds with the detected format**.
+
+**Why:** extensions lie (legacy web exports routinely use `.xls` for CSV), so
+content wins. But content detection isn't infallible either — Tablib's
+`detect_format` leans on `csv.Sniffer`, which fails on single-column CSV/TSV
+(no delimiter to sniff) — so `-f` is the escape hatch. The detection fallback
+chain (`_detect_format_from_bytes`, shared by file and stdin paths) is:
+binary detect -> decode to text -> text detect -> a last-resort "looks like
+plain text lines" heuristic that assumes TSV (TSV over CSV so values
+containing commas aren't split).
+
+### Single-sheet targets never auto-split
+Single-sheet output formats (csv/tsv/dbf/cli/jira/latex/sql/...) never
+silently fan a multi-sheet input out into multiple files. The user must pick
+a single sheet explicitly. (Relevant as the multi-sheet input roadmap lands;
+see `TODO.md`.)
+
+## Dispatch model
+
+`cli()` is a flat four-way switch — list formats / list sheets / multi-input
+Databook / single input — each delegating to a `_run_*` helper. Mode is chosen
+explicitly, not by re-deriving flag combinations at each call site. A new mode
+adds one branch in `cli()` plus a `_run_*`; mutual-exclusion rules live in
+`_validate_args` (extract a per-flag `_validate_*` helper, as `_validate_list_sheets`
+already does, rather than growing one function past the C901 cap).
