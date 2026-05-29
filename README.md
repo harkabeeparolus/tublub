@@ -1,11 +1,17 @@
 # tublub
 
-Convert or view tabular data files using [Tablib](https://github.com/jazzband/tablib).
-Tublub is just a simple CLI wrapper around Tablib.
+Convert or view tabular data files — CSV, JSON, XLSX, YAML, and more — from
+the command line.
+
+tublub is a thin wrapper around [Tablib](https://github.com/jazzband/tablib).
+Tablib reads and writes plenty of formats, but it won't open the files for
+you — you have to know which ones need binary mode, special newline handling,
+and so on. tublub bakes that per-format knowledge in, so you just point it at
+a file and it works.
 
 ```text
 $ tublub --list
-Available formats: json xlsx xls yaml csv tsv ods dbf html jira latex df rst cli
+Available formats: json xlsx xls yaml csv tsv ods dbf html jira latex rst sql cli
 
 $ tublub input.json
 Username |Identifier|First name|Last name
