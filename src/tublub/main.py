@@ -153,6 +153,28 @@ def guess_file_format(filename: Path | None = None) -> str | None:
     return None
 
 
+def _resolve_output_format(force_format: str | None, file_name: Path) -> str:
+    """Resolve output format from an explicit flag or the file extension."""
+    file_format = force_format or guess_file_format(file_name)
+    if file_format is None:
+        msg = f"Unable to detect target file format for: {file_name}"
+        raise TublubError(msg)
+    return file_format
+
+
+def _open_for_format(file_name: Path, cfg: FormatConfig, *, write: bool) -> IO[Any]:
+    """Open a file in the read/write mode and newline policy its format needs.
+
+    Binary formats open in "rb"/"wb"; everything else in "r"/"w". Only CSV
+    sets a non-default newline; it is threaded through here so callers don't
+    reach into cfg.open_kwargs at every open site.
+    """
+    mode = "w" if write else "r"
+    if cfg.binary:
+        mode += "b"
+    return file_name.open(mode, newline=cfg.open_kwargs.get("newline"))
+
+
 def load_dataset_file(
     file_name: Path,
     extra_args: dict[str, Any],
@@ -161,11 +183,9 @@ def load_dataset_file(
     """Load a file into a Tablib dataset."""
     fmt = _resolve_input_format(file_name, in_format)
     cfg = FORMATS.get(fmt, _DEFAULT_FMT)
-    open_mode = "rb" if cfg.binary else "r"
-    newline = cfg.open_kwargs.get("newline")
     extra_load_args = filter_args("load", extra_args, fmt)
 
-    with file_name.open(open_mode, newline=newline) as fh:
+    with _open_for_format(file_name, cfg, write=False) as fh:
         return tablib.import_set(fh, format=fmt, **extra_load_args)
 
 
@@ -191,11 +211,9 @@ def load_databook_file(
     """
     fmt = _resolve_input_format(file_name, in_format)
     cfg = FORMATS.get(fmt, _DEFAULT_FMT)
-    open_mode = "rb" if cfg.binary else "r"
-    newline = cfg.open_kwargs.get("newline")
     extra_load_args = filter_args("load", extra_args, fmt)
 
-    with file_name.open(open_mode, newline=newline) as fh:
+    with _open_for_format(file_name, cfg, write=False) as fh:
         payload = fh.read()
     try:
         return tablib.Databook().load(payload, format=fmt, **extra_load_args)
@@ -230,21 +248,26 @@ def _resolve_input_format(file_name: Path, in_format: str | None) -> str:
 
 
 def detect_format_from_file(file_name: Path) -> str | None:
-    """Detect format from file content, independent of file extension.
+    """Detect format from file content, independent of file extension."""
+    with file_name.open("rb") as fh:
+        raw = fh.read()
+    return _detect_format_from_bytes(raw)
 
-    Tablib's detect_format() requires the file opened in the right mode:
-    binary formats (xlsx, xls, ods, dbf) need "rb" or Python raises
-    UnicodeDecodeError; CSV/TSV need "r" because csv.Sniffer requires str
-    (returns None on bytes). JSON and YAML work in either mode.
-    There is no single open mode that works for all formats, so we try
-    binary first (catches binary formats + json + yaml) then text (csv/tsv).
 
-    As a last resort, if the file looks like plain text lines, assume TSV.
+def _detect_format_from_bytes(raw: bytes) -> str | None:
+    """Detect a tablib format from raw bytes, independent of file extension.
+
+    Tablib's detect_format() requires the data in the right form: binary
+    formats (xlsx, xls, ods, dbf) need bytes; CSV/TSV need str because
+    csv.Sniffer returns None on bytes. JSON and YAML work either way.
+    There is no single form that works for all formats, so we try the raw
+    bytes first (catches binary formats + json + yaml) then the decoded
+    text (csv/tsv).
+
+    As a last resort, if the text looks like plain text lines, assume TSV.
     This catches single-column data where csv.Sniffer fails (no delimiter).
     TSV is preferred over CSV because it won't split on commas in values.
     """
-    with file_name.open("rb") as fh:
-        raw = fh.read()
     fmt = tablib.detect_format(raw)
     if fmt is None:
         try:
@@ -334,20 +357,7 @@ def _read_and_detect_stdin(
         msg = "No data received on stdin"
         raise TublubError(msg)
 
-    fmt = in_format
-    if fmt is None:
-        # Try binary first (detects xlsx, json, yaml, etc.)
-        fmt = tablib.detect_format(raw)
-        if fmt is None:
-            # Fall back to text (detects csv, tsv), then text-lines heuristic
-            try:
-                text = raw.decode()
-            except UnicodeDecodeError:
-                text = None
-            if text is not None:
-                fmt = tablib.detect_format(text)
-                if fmt is None and _looks_like_text_lines(text):
-                    fmt = "tsv"
+    fmt = in_format or _detect_format_from_bytes(raw)
     if fmt is None:
         msg = "Unable to detect input format from stdin; use -f to specify it"
         raise TublubError(msg)
@@ -362,14 +372,10 @@ def save_dataset_file(
     force_format: str | None = None,
 ) -> None:
     """Save a Tablib dataset to a file."""
-    file_format = force_format or guess_file_format(file_name)
-    if file_format is None:
-        msg = f"Unable to detect target file format for: {file_name}"
-        raise TublubError(msg)
+    file_format = _resolve_output_format(force_format, file_name)
 
     cfg = FORMATS.get(file_format, _DEFAULT_FMT)
-    newline = cfg.open_kwargs.get("newline")
-    with file_name.open("wb" if cfg.binary else "w", newline=newline) as fh:
+    with _open_for_format(file_name, cfg, write=True) as fh:
         export_dataset(data, file_format, extra_args, file_handle=fh)
 
     print(f"Saved '{file_name}', {len(data)} records ({file_format})")
@@ -397,10 +403,7 @@ def save_databook_file(
     force_format: str | None = None,
 ) -> None:
     """Save a Tablib Databook (multi-sheet workbook) to a file."""
-    file_format = force_format or guess_file_format(file_name)
-    if file_format is None:
-        msg = f"Unable to detect target file format for: {file_name}"
-        raise TublubError(msg)
+    file_format = _resolve_output_format(force_format, file_name)
 
     cfg = FORMATS.get(file_format, _DEFAULT_FMT)
     extra_save_args = filter_args("save", extra_args, file_format)
@@ -411,8 +414,7 @@ def save_databook_file(
         msg = f"Format {file_format!r} does not support multi-sheet (Databook) output"
         raise TublubError(msg) from exc
 
-    newline = cfg.open_kwargs.get("newline")
-    with file_name.open("wb" if cfg.binary else "w", newline=newline) as fh:
+    with _open_for_format(file_name, cfg, write=True) as fh:
         fh.write(output)
 
     print(f"Saved '{file_name}', {book.size} sheets ({file_format})")
@@ -533,7 +535,7 @@ def parse_command_line(
     if infiles == [_DASH]:
         infiles = []
         args.stdin = True
-    elif not infiles and not args.list and not sys.stdin.isatty():
+    elif _should_use_implicit_stdin(infiles, args):
         args.stdin = True
 
     args.outfile = outfile
@@ -541,17 +543,28 @@ def parse_command_line(
 
     _validate_args(parser, args)
 
-    # Make a dict of all args.xxx for xxx in the FormatConfig structures
-    all_extra_args: set[str] = set()
-    for cfg in FORMATS.values():
-        all_extra_args |= cfg.load_args | cfg.save_args
-    extra_args = {
-        key: value
-        for key in all_extra_args
-        if (value := getattr(args, key, None)) is not None
-    }
+    return args, _collect_extra_args(args)
 
-    return args, extra_args
+
+def _should_use_implicit_stdin(infiles: list[Path], args: argparse.Namespace) -> bool:
+    """Whether to read stdin even though no '-' was given on the command line.
+
+    True when nothing was passed on the command line and stdin is a pipe
+    (not a TTY), so `cmd | tublub` works without an explicit '-'. An
+    interactive TTY with no input is a usage error, not stdin, so we
+    return False there and let validation report "No input data provided."
+    """
+    return not infiles and not args.list and not sys.stdin.isatty()
+
+
+def _collect_extra_args(args: argparse.Namespace) -> dict[str, Any]:
+    """Gather format-specific kwargs (delimiter, skip_lines, ...) set on args."""
+    known: set[str] = set()
+    for cfg in FORMATS.values():
+        known |= cfg.load_args | cfg.save_args
+    return {
+        key: value for key in known if (value := getattr(args, key, None)) is not None
+    }
 
 
 def _reconcile_positionals(
@@ -612,13 +625,16 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         if not f.is_file():
             parser.error(f"Input file {f} does not exist.")
 
-    if args.out_format and args.out_format not in get_formats():
-        parser.error(f"Invalid format {args.out_format}, use one of: {get_formats()}")
+    _check_known_format(parser, args.out_format, "format")
+    _check_known_format(parser, args.in_format, "input format")
 
-    if args.in_format and args.in_format not in get_formats():
-        parser.error(
-            f"Invalid input format {args.in_format}, use one of: {get_formats()}"
-        )
+
+def _check_known_format(
+    parser: argparse.ArgumentParser, fmt: str | None, label: str
+) -> None:
+    """parser.error (which exits) if fmt is set but not a known tablib format."""
+    if fmt and fmt not in get_formats():
+        parser.error(f"Invalid {label} {fmt}, use one of: {get_formats()}")
 
 
 def build_argument_parser() -> argparse.ArgumentParser:

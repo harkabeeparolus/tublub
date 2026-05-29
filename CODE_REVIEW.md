@@ -9,6 +9,24 @@ Cross-reference: `TODO.md` covers the multi-sheet feature roadmap. The
 items below are orthogonal polish/refactor work. Where a TODO.md item
 touches the same code, the cross-reference is noted inline.
 
+## Status summary
+
+All actionable findings are resolved. Priority A/B landed in earlier
+commits; C1-C4, D1, D2, E2 landed together as internal cleanup (no
+behavior change); E1 is WONTFIX; the F-series are decisions, now recorded
+inline.
+
+| Finding | Status |
+|---------|--------|
+| CR-A1, A2, A3 | DONE (earlier commits) |
+| CR-B1, B2, B3 | DONE (earlier commits) |
+| CR-C1, C2, C3, C4 | DONE |
+| CR-D1 | DONE (resolved by C3) |
+| CR-D2 | DONE |
+| CR-E1 | WONTFIX (style, not worth the diff) |
+| CR-E2 | DONE |
+| CR-F1, F2, F3 | DECIDED (no change) |
+
 ---
 
 ## Priority A — architectural questions worth a real conversation
@@ -17,6 +35,9 @@ These shape what the next chunk of feature work looks like. Best decided
 *before* TODO 3–8 land, because those items multiply the affected code.
 
 ### CR-A1 — Dataset vs Databook: parallel paths everywhere
+
+**Status: DONE** — `try_load_file`/`try_load_stdin` now encapsulate the
+fallback handshake (status-quo + helper direction).
 
 **Where:** `load_dataset_file` / `load_databook_file`,
 `load_dataset_stdin` / `load_databook_stdin`, `save_dataset_file` /
@@ -48,6 +69,9 @@ two implementations and a coordination point.
 
 ### CR-A2 — `cli()` dispatch is implicit mode detection
 
+**Status: DONE** — `cli()` is now a flat four-way switch with per-mode
+`_run_*` helpers.
+
 **Where:** `src/tublub/main.py:58-102`.
 
 **State:** Mode is inferred from flag combinations: `args.list`,
@@ -72,6 +96,9 @@ across two files and a growing pile of `parser.error()` calls.
 ---
 
 ### CR-A3 — Input state is fragmented across three Namespace attrs
+
+**Status: DONE** — `args.infile` dropped; `args.infiles` + `args.stdin`
+are the only input state. (Also settles CR-F3.)
 
 **Where:** `parse_command_line`, line 484-486 sets `args.infile`,
 `args.outfile`, `args.infiles`; `args.stdin` is set earlier.
@@ -99,6 +126,9 @@ stdin multi-sheet, the invariants get harder to keep straight.
 
 ### CR-B1 — Dead guard in `export_dataset`
 
+**Status: DONE** — guard removed; `_default_export_handle` has a narrow
+return type so the type checker needs no appeasement.
+
 **Where:** `src/tublub/main.py:414-416`.
 
 ```python
@@ -124,6 +154,9 @@ this will rot.
 ---
 
 ### CR-B2 — Broad exception catch in `load_databook_*`
+
+**Status: DONE** — accepted as a deliberate choice; regression tests
+confirm corrupt JSON surfaces as a real error, not silent fallback.
 
 **Where:** `src/tublub/main.py:202-203` and `:284-285`.
 
@@ -156,6 +189,10 @@ which may then succeed with garbage, or fail with a confusing message.
 
 ### CR-B3 — `_unique_titles` collides on stem regardless of directory
 
+**Status: DONE** — parent-dir qualifies the title on stem collision
+(`data_a`, `backup_a`), with the numeric suffix as final fallback and a
+stderr note on any disambiguation.
+
 **Where:** `src/tublub/main.py:387-396`.
 
 **State:** `tublub -o out.xlsx data/a.csv backup/a.csv` produces sheets
@@ -179,6 +216,9 @@ worth resolving the policy before that lands.
 
 ### CR-C1 — Format detection logic duplicated for file vs stdin
 
+**Status: DONE** — extracted `_detect_format_from_bytes(raw)`; both
+`detect_format_from_file` and `_read_and_detect_stdin` call it.
+
 **Where:** `detect_format_from_file` (`:246-257`) and the inner block of
 `_read_and_detect_stdin` (`:303-316`).
 
@@ -194,6 +234,9 @@ from a path; the stdin version starts from already-read bytes.
 ---
 
 ### CR-C2 — Output format resolution duplicated across save helpers
+
+**Status: DONE** — extracted `_resolve_output_format(force, path)`; both
+savers call it.
 
 **Where:** `save_dataset_file` (`:331-334`) and `save_databook_file`
 (`:366-369`).
@@ -213,6 +256,9 @@ if file_format is None:
 
 ### CR-C3 — Format-validity check duplicated in `_validate_args`
 
+**Status: DONE** — extracted `_check_known_format(parser, fmt, label)`;
+the two distinct error messages are preserved. (Also resolves CR-D1.)
+
 **Where:** `src/tublub/main.py:563-569`.
 
 **State:** Two near-identical branches for `args.out_format` and
@@ -226,6 +272,9 @@ if file_format is None:
 ---
 
 ### CR-C4 — Newline plumbing repeated at every open site
+
+**Status: DONE** — extracted `_open_for_format(path, cfg, *, write)`; the
+four open sites now call it instead of reaching into `cfg.open_kwargs`.
 
 **Where:** `:165, :168, :194-195, :198, :337-338, :380-381`.
 
@@ -244,6 +293,10 @@ non-default newline; the dance happens for every format.
 
 ### CR-D1 — `_validate_args` is near the C901 cap and growing
 
+**Status: DONE** — resolved as a side effect of CR-C3; pulling the two
+format checks into `_check_known_format` dropped the branch count well
+under the cap. Revisit when TODO 3/4 flags land.
+
 **Where:** `src/tublub/main.py:548-569`.
 
 **State:** Already at multiple-branch territory; TODOs 3 and 4 add
@@ -259,6 +312,10 @@ function by name as a refactor candidate.
 ---
 
 ### CR-D2 — `parse_command_line` does five things
+
+**Status: DONE** — extracted `_collect_extra_args(args)` (and
+`_should_use_implicit_stdin` per CR-E2); `parse_command_line` now reads as
+a short orchestration.
 
 **Where:** `src/tublub/main.py:464-500`.
 
@@ -277,6 +334,9 @@ holds the lot.
 
 ### CR-E1 — `_unique_titles` uses manual dict counting
 
+**Status: WONTFIX** — style preference; current code is readable and the
+diff isn't worth it (matches the verdict below).
+
 **Where:** `src/tublub/main.py:387-396`.
 
 **State:** Loop with `counts.get(stem, 0) + 1`. `collections.Counter`
@@ -288,6 +348,9 @@ not be worth the diff. Worth a one-minute decision, not a debate.
 ---
 
 ### CR-E2 — Implicit stdin detection is easy to misread
+
+**Status: DONE** — extracted `_should_use_implicit_stdin(infiles, args)`
+with a docstring explaining the pipe-vs-TTY reasoning.
 
 **Where:** `src/tublub/main.py:481`.
 
@@ -313,6 +376,11 @@ when piped. Correct but the intent isn't obvious at a glance.
 stderr and proceeds with `detected`. Is "warn and continue" the right
 policy, or should `-f` be required when the mismatch happens?
 
+**Decided: keep warn-and-continue.** `-f` is the explicit override; hard
+-failing on a mismatch would be hostile to the common case (legacy
+exports with wrong extensions, which is exactly why we trust content over
+extension). No change.
+
 ### CR-F2 — Empty-input parity
 
 **Where:** `cli()` `:83-85` (`if not my_data: sys.exit(...)`) vs
@@ -320,11 +388,19 @@ policy, or should `-f` be required when the mismatch happens?
 Slightly different error messages and triggering conditions. Confirm
 this is intentional or unify the wording.
 
+**Decided: leave as-is.** The two paths genuinely differ — single-input
+reports the source it read from, the databook path reports across all
+inputs — so the distinct messages carry real information. No change.
+
 ### CR-F3 — `args.stdin` placement
 
 `args.stdin` is set inside `parse_command_line` (not by argparse).
 Confirm we want this — alternative is `args.stdin` lives only on the
 `InputSpec` proposed in CR-A3 and never on `args`.
+
+**Decided: keep on `args`.** CR-A3 chose `args.infiles` + `args.stdin` as
+the input state rather than a separate `InputSpec`, so this is settled.
+No change.
 
 ---
 

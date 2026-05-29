@@ -39,12 +39,14 @@ Always update `CHANGELOG.md` under the `[Unreleased]` section when making user-f
 ## Ruff gotchas
 
 - RUF001/2/3 flag ambiguous Unicode (e.g. `×`, `−`, `–`) in strings, comments, and docstrings — use ASCII equivalents.
+- SIM108 turns `if/else` value-assignment into a ternary; if the ternary would nest ugly, build a base value then mutate it (e.g. `mode = "w" if write else "r"; if binary: mode += "b"`) instead of fighting it.
 - C901/PLR0912 cap functions at ~10 cyclomatic / ~12 branches — extract a helper before piling more guards into `_validate_args` or `cli`.
 - S101 forbids `assert` in `src/` (tests get it via per-file-ignores). For type narrowing, use an explicit `if x is None: raise TublubError(...)` instead, or extract a helper whose return type is already narrow (see `_default_export_handle`) rather than reaching for `typing.cast`.
 - D301 rejects backslashes in docstrings — spell out characters (e.g. "backslash") or prefix the docstring with `r"""`.
 
 ## Testing patterns
 
+- Verifying CLI error paths: `just run` swallows stderr and only reports the exit code on failure. Run `uv run tublub ARGS` directly to see the actual `parser.error`/`sys.exit` message.
 - Argparse unit tests: call `parse_command_line(argv)` directly and assert on the returned `args`.
 - CLI integration tests: `monkeypatch.setattr(sys, "argv", [...])`, call `cli()`, read `capsys.readouterr().out`.
 - Rejection tests use `pytest.raises(SystemExit)` since `parser.error()` exits.
