@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 * Sheet-title disambiguation for multi-input Databook output now prefers the
   parent directory name over a numeric suffix when input stems collide, and
   prints a stderr note when disambiguation happens.
+* Multi-sheet titles are now clamped to 31 characters (the XLSX worksheet-title
+  limit), with disambiguation suffixes trimmed to fit inside the limit, so
+  generated workbooks no longer trigger openpyxl's "Title is more than 31
+  characters" warning and stay readable in all applications.
 
 ## [0.4.1] - 2026-02-09
 

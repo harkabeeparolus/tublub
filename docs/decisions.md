@@ -287,3 +287,26 @@ tags. Leave the existing unprefixed `0.x` tags as they are.
 prefixed tags are the more common ecosystem convention. Existing tags are
 published history, so we don't rewrite them — we just stop adding to the
 inconsistency.
+
+---
+
+### 015. Clamp sheet titles to 31 characters in `_unique_titles`
+*2026-05-29 · Accepted*
+
+**Context.** XLSX caps worksheet titles at 31 characters. `_unique_titles`
+never enforced this, so long stems (or long parent-qualified titles) produced
+sheet names that triggered openpyxl's "Title is more than 31 characters"
+warning and could be unreadable in some applications.
+
+**Decision.** Clamp every generated title to `XLSX_TITLE_LIMIT` (31) inside
+`_unique_titles`, and dedup on the *clamped* candidate, trimming the base so any
+`_2`/`_3` suffix still fits within the limit.
+
+**Why.** Titles are assigned in `build_databook` before the output format is
+known, so clamping there — rather than branching in the XLSX save path — keeps
+with the "no static capability matrix" principle (008): one short cap is safe
+for every Databook format, no per-format conditional. The switch from the
+per-base `seen` dict to a `used` set with a fit-and-retry loop is a correctness
+requirement, not the style churn rejected in 013: truncation can make two
+distinct long stems collide at char 31, which the old full-base dict would have
+emitted as duplicate sheet names.

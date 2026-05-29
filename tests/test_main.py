@@ -487,6 +487,22 @@ class TestUniqueTitles:
     def test_empty(self):
         assert _unique_titles([]) == []
 
+    def test_long_stem_truncated_to_limit(self, capsys):
+        stem = "a" * 40
+        titles = _unique_titles([Path(f"{stem}.csv")])
+        assert titles == ["a" * 31]
+        assert all(len(t) <= 31 for t in titles)
+        assert "disambiguated" in capsys.readouterr().err
+
+    def test_long_shared_prefix_stays_unique(self):
+        # Two distinct stems sharing a >31-char prefix clamp to the same 31
+        # chars, so the _2 suffix kicks in with the base trimmed to fit.
+        prefix = "x" * 40
+        titles = _unique_titles([Path(f"{prefix}A.csv"), Path(f"{prefix}B.csv")])
+        assert all(len(t) <= 31 for t in titles)
+        assert len(set(titles)) == 2
+        assert titles == ["x" * 31, "x" * 29 + "_2"]
+
 
 # --- build_databook ---
 

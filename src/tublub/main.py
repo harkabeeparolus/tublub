@@ -34,6 +34,7 @@ class FormatConfig:
 
 
 _MIN_DATABOOK_INPUTS = 2  # 2+ inputs → multi-sheet Databook output
+XLSX_TITLE_LIMIT = 31  # XLSX caps worksheet titles at 31 characters
 _DASH = Path("-")
 
 
@@ -420,34 +421,45 @@ def save_databook_file(
     print(f"Saved '{file_name}', {book.size} sheets ({file_format})")
 
 
+def _fit_title(base: str, suffix: str = "") -> str:
+    """Fit a title base plus an optional suffix within XLSX_TITLE_LIMIT."""
+    return base[: XLSX_TITLE_LIMIT - len(suffix)] + suffix
+
+
 def _unique_titles(paths: list[Path]) -> list[str]:
     """Return sheet titles from path stems; disambiguate stem collisions.
 
     On stem collision (data/a.csv + backup/a.csv) the parent directory
     qualifies the title (data_a, backup_a). Underscore is used because
     XLSX sheet titles forbid the characters slash, backslash, question
-    mark, asterisk, and brackets. If the parent-qualified
-    title also collides (same parent name twice in the input list), or
-    a path has no parent name, the existing _2/_3 numeric suffix kicks
-    in on top. A stderr note is emitted whenever any disambiguation
-    happens so users notice that the workbook's sheet names don't match
-    the input stems verbatim.
+    mark, asterisk, and brackets. Titles are clamped to XLSX_TITLE_LIMIT
+    (XLSX caps worksheet titles at 31 characters). If the parent-qualified
+    or clamped title also collides (same parent name twice in the input
+    list, a path with no parent name, or two long stems sharing a 31-char
+    prefix), a _2/_3 numeric suffix kicks in on top, with the base trimmed
+    so the suffix still fits. A stderr note is emitted whenever any
+    disambiguation happens so users notice that the workbook's sheet names
+    don't match the input stems verbatim.
     """
     stem_counts = Counter(p.stem for p in paths)
     titles: list[str] = []
-    seen: dict[str, int] = {}
+    used: set[str] = set()
     for path in paths:
         stem = path.stem
         if stem_counts[stem] > 1 and path.parent.name:
-            base = f"{path.parent.name}_{stem}"
+            base = _fit_title(f"{path.parent.name}_{stem}")
         else:
-            base = stem
-        n = seen.get(base, 0) + 1
-        seen[base] = n
-        titles.append(base if n == 1 else f"{base}_{n}")
+            base = _fit_title(stem)
+        candidate = base
+        n = 1
+        while candidate in used:
+            n += 1
+            candidate = _fit_title(base, f"_{n}")
+        used.add(candidate)
+        titles.append(candidate)
     if any(t != p.stem for t, p in zip(titles, paths, strict=True)):
         print(
-            "Note: sheet titles disambiguated due to filename collisions",
+            "Note: sheet titles disambiguated (filename collisions or 31-char limit)",
             file=sys.stderr,
         )
     return titles
