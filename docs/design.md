@@ -19,6 +19,12 @@ serialization, and the set of supported formats. Wherever a choice is between
 "teach tublub about formats" and "ask Tablib and react", we ask Tablib (see
 *No static capability matrix* below).
 
+This extends to dependencies: tublub pulls in only Tablib's **file-format**
+extras (`tablib[cli,html,ods,xls,xlsx,yaml]`), never the ones aimed at Python
+developers manipulating data in code (e.g. Pandas). When Tablib's extras
+change, the test for adopting a new one is simply "is it a file format?" (see
+[`decisions.md` 001](decisions.md)).
+
 ## Module layout
 
 Single module: `src/tublub/main.py`. Entry point `tublub.main:cli`. The flow
@@ -96,7 +102,9 @@ content wins. But content detection isn't infallible either — Tablib's
 chain (`_detect_format_from_bytes`, shared by file and stdin paths) is:
 binary detect -> decode to text -> text detect -> a last-resort "looks like
 plain text lines" heuristic that assumes TSV (TSV over CSV so values
-containing commas aren't split).
+containing commas aren't split). This *inverted* the earlier (2024) behaviour
+that trusted the extension first and only fell back to content on failure;
+see [`decisions.md` 004](decisions.md).
 
 ### Single-sheet targets never auto-split
 Single-sheet output formats (csv/tsv/dbf/cli/jira/latex/sql/...) never
