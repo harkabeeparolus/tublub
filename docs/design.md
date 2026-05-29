@@ -13,6 +13,13 @@ A thin CLI wrapper over [Tablib](https://tablib.readthedocs.io) that converts
 and views tabular data between formats (CSV, TSV, JSON, YAML, XLSX, XLS, ODS,
 DBF, and Tablib's export-only formats).
 
+**Why it exists.** Tablib knows how to *parse and serialize* each format, but
+not how to *open the file on disk* for it — binary vs text mode, newline
+handling — which historically was documented only in Tablib's web docs, per
+format. tublub's founding contribution is encoding that per-format file-open
+knowledge in code (the `FORMATS` table below), so callers never have to look
+it up. See [`decisions.md` 000](decisions.md).
+
 **Design philosophy: don't reimplement Tablib.** tublub adds a command-line
 surface, format detection, and ergonomics; Tablib owns the actual parsing,
 serialization, and the set of supported formats. Wherever a choice is between
@@ -120,3 +127,15 @@ explicitly, not by re-deriving flag combinations at each call site. A new mode
 adds one branch in `cli()` plus a `_run_*`; mutual-exclusion rules live in
 `_validate_args` (extract a per-flag `_validate_*` helper, as `_validate_list_sheets`
 already does, rather than growing one function past the C901 cap).
+
+## Future directions
+
+Not commitments — possible ways the core problem (decision 000) could be
+solved more fundamentally:
+
+- **Upstream it.** Persuade Tablib's maintainers to encode the per-format
+  file-open rules in Tablib itself, so tublub — and everyone else using Tablib
+  for file I/O — would no longer have to own that knowledge.
+- **Become a full developer-facing wrapper.** Grow tublub from a CLI into a
+  library that any Python developer can use to load/save Tablib formats
+  without re-reading the docs each time they add a format.

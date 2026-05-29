@@ -14,6 +14,32 @@ where genuinely so.
 
 ---
 
+### 000. Encode Tablib's per-format file-open rules in code — why tublub exists
+*2022-07-26 · Accepted*
+
+**Context.** Tablib supports many tabular formats for parsing and
+serialization, but it does not itself know how to *open the files on disk* for
+each format — whether a format needs binary or text mode, how newlines must be
+handled, and so on. At the time, that knowledge lived only in Tablib's web
+documentation, spelled out per format. A tool that wanted to use Tablib for
+file I/O therefore couldn't lean on Tablib's code for the open step; it had to
+go read the online docs for every format it meant to support.
+
+**Decision.** Build tublub as a thin wrapper that puts the file-open knowledge
+into actual Python code. The `FORMATS` / `FormatConfig` table carries, per
+format, whether it is binary and what open kwargs (e.g. `newline`) it needs,
+so loading and saving each format to disk just works without consulting the
+docs.
+
+**Why.** This gap is the project's reason for existing: encoding the
+per-format open rules once, in code, is the core value tublub adds on top of
+Tablib. (Initial commits `53c48c6` / `0576ec6`; the knowledge now lives in the
+`FORMATS` table — see decision 002 for its structure, and
+[`design.md` Future directions](design.md) for ways this could be solved more
+fundamentally upstream.)
+
+---
+
 ### 001. Depend on Tablib's file-format extras only (no Pandas)
 *2022-07-29 · Accepted*
 
