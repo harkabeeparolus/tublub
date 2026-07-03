@@ -37,7 +37,7 @@ except (tablib.UnsupportedFormat, KeyError, TypeError):
 | `tublub book.xlsx` (multi-sheet, terminal) | Print first sheet + stderr hint about the others |
 | `tublub --list-sheets book.xlsx` | List sheets with row × col counts, exit 0 |
 | `tublub --sheet Users book.xlsx` | Load only `Users`, behave like a single Dataset |
-| `tublub --sheet 0,2 book.xlsx` | Load those two sheets as a Databook subset |
+| `tublub --sheet 0,2 -o out.xlsx book.xlsx` | Save those two sheets as a Databook subset (multi-sheet selection requires `-o`; bare-terminal multi-display is `--all-sheets`' job) |
 | `tublub --all-sheets book.xlsx` | Print every sheet with heading separators |
 | `tublub --all-sheets -o out.xlsx book.xlsx` | Save full Databook (multi-sheet → multi-sheet) |
 | `tublub --all-sheets -o out.csv book.xlsx` | Error: target is single-sheet; instruct user to pass `--sheet` |
@@ -110,10 +110,18 @@ csv returns `None`; malformed xlsx still raises (not silently `None`).
 - Implementation: call `load_databook_file()` from TODO 1. If it returns
   a Databook, iterate its sheets and print
   `f"{title}  {len(ds)} rows × {len(ds.headers or [])} cols"` per sheet.
-- If it returns `None` (single-sheet format), fall back to
-  `load_dataset_file()` and print one line for the lone synthesised sheet
-  using the file stem as title — the flag should work uniformly. Decide
-  and document this in `--help`.
+- For a single-sheet result, report only what was observed (decision 016):
+  print one line with the real title when the loaded object carries one
+  (a size-1 Databook, e.g. a one-sheet XLSX), no title for a fallback
+  Dataset (CSV / records-shaped JSON), and **no `[index]`** in either
+  case. Do not synthesise a `[0] {stem}` line — that would imply a sheet
+  index and invite `--sheet 0`, which TODO 3 rejects on single-sheet
+  inputs. `sheet.title` truthiness distinguishes the two origins without
+  re-checking the loaded type or a format table. Document in `--help`.
+
+> **Note (decision 016):** the originally-shipped 0.5.0 behaviour printed a
+> fabricated `[0] {stem}` line for single-sheet inputs. That is superseded by
+> the observational form above; the change ships alongside TODO 3.
 
 **Tests** — multi-sheet xlsx, single-sheet csv, empty workbook, unknown
 format, mutual-exclusion errors.
@@ -122,23 +130,62 @@ format, mutual-exclusion errors.
 
 ## TODO 3 — `--sheet NAME_OR_INDEX` flag
 
-**Goal:** Pick a subset of sheets by name or index. Repeatable.
+**Goal:** Pick a subset of sheets of a multi-sheet input by name or index.
+Repeatable.
 
-**Tasks**
-- Argparse: `action="append"`, also accept comma-separated values. After
-  parsing, flatten + `split(",")` and store as `args.sheets: list[str]`.
-- Resolution order for each token: try integer (0-based index), then
-  exact title match, then case-insensitive title match. On miss, raise
-  `TublubError` listing all available titles.
-- Default to **0-based** indices (Python convention); document with an
-  example in `--help`. Revisit if pre-PR feedback prefers 1-based.
-- Dispatch: 1 sheet selected → existing Dataset code path; >1 selected →
-  Databook code path (build a fresh Databook from the chosen subset).
-- Mutually exclusive with `--all-sheets` and `--list-sheets`.
+Design decisions for this item are recorded in
+[`decisions.md` 016](decisions.md). The summary below reflects them; where
+this section once differed (notably "single-sheet input still works
+`--sheet 0`"), 016 supersedes it.
+
+**Parsing & validation**
+- Argparse: `action="append"`, dest `sheet`, default `None`. In
+  `parse_command_line` flatten on commas, strip each token, drop empties,
+  and store as `args.sheets: list[str]`. An empty result (e.g.
+  `--sheet ,`) is a usage error ("no sheet selector given").
+- Add `_validate_sheet` mirroring `_validate_list_sheets`: reject combining
+  with `--list`, `--list-sheets` (and `--all-sheets` once it exists),
+  reject stdin and 2+ inputs, and require an input file. **Single local
+  file only** in this increment — stdin is TODO 8, multi-input is TODO 7.
+
+**Resolution (per token)**
+- An integer-looking token is **always** a 0-based index. Out of range →
+  `TublubError` "index N out of range (0-M)"; never fall back to a title
+  match. 0-based is consistent with what `--list-sheets` prints.
+- A non-integer token matches a title: exact first, then case-insensitive.
+  On miss, `TublubError` listing all available titles.
+- Resolve against a shared `_sheets_of(loaded) -> list[tablib.Dataset]`
+  normaliser (a Databook's `.sheets()`, or `[dataset]` for the fallback
+  Dataset) so `--list-sheets` and `--sheet` can't drift.
+
+**Dispatch (`_run_sheets`, dispatched from `cli()` before the 2+ inputs
+branch)**
+- **Single-sheet input** (the normalised list has length 1): reject with
+  the observational message "input resolved to a single sheet; `--sheet`
+  applies to multi-sheet inputs" — *not* a capability claim (008/016). This
+  covers a 1-sheet XLSX (size-1 Databook) and a CSV/records-JSON (fallback
+  Dataset) alike; rejection is about the observed sheet count, not the
+  format.
+- **1 sheet selected** from a multi-sheet input → extract that Dataset and
+  render it through the existing single-Dataset path. Extract
+  `_render_dataset(ds, args, extra_args)` from the tail of `_run_single`
+  (save to `-o` / export via `-t` / print) so this path reuses the real
+  renderer and can't drift.
+- **>1 sheet selected** → build a fresh Databook from the chosen subset, in
+  **selection order**, deduping by resolved sheet identity (two tokens
+  hitting the same sheet keep the first, drop the rest silently). Output:
+  reuse `save_databook_file` (requires `-o`). With no `-o`, error
+  "selecting multiple sheets requires `-o FILE`; terminal display comes
+  with `--all-sheets`" — multi-sheet terminal print is TODO 5 and
+  Databook-to-stdout `-t` export is TODO 4, both deferred.
 
 **Tests** — pick by name, pick by index, comma list, repeated `--sheet`,
-unknown name (error message lists titles), case-insensitive match,
-single-sheet input still works (`--sheet 0`).
+selection-order preserved, duplicate tokens deduped, unknown name (error
+lists titles), case-insensitive match, out-of-range index errors,
+single-sheet input rejected (`--sheet 0 users.csv` and a 1-sheet xlsx both
+error), multi-select without `-o` errors, multi-select to a single-sheet
+target (`-o out.csv`) errors via `save_databook_file`, mutual-exclusion and
+stdin/multi-input rejection.
 
 ---
 
@@ -302,10 +349,12 @@ input comes from stdin.
 
 ## Open questions to resolve during implementation
 
-- 0-based vs 1-based indices for `--sheet`. Lean 0-based (Python
-  convention).
-- Whether `--list-sheets` on a single-sheet format prints one row
-  (uniform) or errors (strict). Lean uniform.
+- ~~0-based vs 1-based indices for `--sheet`.~~ **Resolved: 0-based**
+  (decision 016), consistent with `--list-sheets` output.
+- ~~Whether `--list-sheets` on a single-sheet format prints one row or
+  errors.~~ **Resolved: prints one observational row** (real title if
+  present, no synthesised `[index]`/stem-title); `--sheet` on a
+  single-sheet input is *rejected* (decision 016).
 - Title separator for expanded multi-input sheets (`__` vs `:` vs other).
   Lean `__`; `:` was deliberately rejected to keep `book.xlsx::Sheet1`
   syntax available as a future option.

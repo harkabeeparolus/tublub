@@ -310,3 +310,40 @@ per-base `seen` dict to a `used` set with a fit-and-retry loop is a correctness
 requirement, not the style churn rejected in 013: truncation can make two
 distinct long stems collide at char 31, which the old full-base dict would have
 emitted as duplicate sheet names.
+
+---
+
+### 016. `--sheet` rejects single-sheet inputs; `--list-sheets` reports observed sheets, not capability
+*2026-05-31 · Accepted*
+
+**Context.** The TODO 3 draft had `--sheet 0 users.csv` succeed on a
+single-sheet input, and the shipped `--list-sheets` (0.5.0) printed a
+synthesized `[0] {stem}` line for such inputs. Both imply a sheet index and
+identity for inputs that have neither.
+
+**Decision.**
+- `--sheet` is **rejected** on any input that resolves to a single sheet, with
+  an *observational* message ("input resolved to a single sheet; `--sheet`
+  applies to multi-sheet inputs") — never a capability claim about the format.
+- `--list-sheets` reports only what was observed: multi-sheet input →
+  `[idx] title  N rows x M cols`; single-sheet input → the real title when the
+  loaded object carries one (a size-1 `Databook`, e.g. a one-sheet XLSX), no
+  title for a fallback `Dataset` (CSV / records-shaped JSON), and **no
+  `[index]`** in either single-sheet case.
+- Integer-looking `--sheet` tokens are **always** 0-based indices; out of range
+  errors rather than falling back to a title match. Non-integer tokens match
+  titles (exact, then case-insensitive).
+
+**Why.** We can't say a file "cannot contain multiple sheets" without a static
+`{format: supports_databook}` table, which 008 bans: `load_databook_file`
+returning `None` conflates a genuinely single-sheet format (CSV) with a
+Databook-capable format holding single-Dataset shape (records JSON). The
+observational wording states only the fact we have — this input is one sheet —
+and stays 008-safe. A fabricated `[0] {stem}` index also advertises `--sheet 0`,
+which we then reject, so dropping the synthesized index removes a false
+affordance. `sheet.title` truthiness distinguishes the two single-sheet origins
+(real Databook title vs `None` on a fallback Dataset) without re-checking the
+loaded type or consulting a format table. Always-index keeps token resolution
+predictable; a numeric *title* is a vanishing edge not worth the typo-masking
+cost of an index-then-title fallback. This reverses the TODO 3 draft and changes
+`--list-sheets` output shipped in 0.5.0. (Commit: pending the TODO 3 changeset.)
