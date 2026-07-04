@@ -1,7 +1,6 @@
 """Tests for tublub.main."""
 
 import io
-import sys
 from pathlib import Path
 
 import pytest
@@ -10,6 +9,7 @@ import tablib
 from tublub.main import (
     FORMATS,
     TublubError,
+    _default_export_handle,
     _looks_like_text_lines,
     _unique_titles,
     build_argument_parser,
@@ -260,22 +260,25 @@ class TestExportDataset:
         content = out.read_text()
         assert "Alice" in content
 
-    def test_export_binary_to_tty_raises(self, sample_data, monkeypatch):
-        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-        with pytest.raises(TublubError, match="binary"):
-            export_dataset(sample_data, "xlsx", extra_args={})
+    def test_default_handle_binary_to_tty_raises(self):
+        class TTYStdout(io.TextIOWrapper):
+            def isatty(self):
+                return True
 
-    def test_export_binary_to_piped_stdout(self, sample_data, monkeypatch):
+        with pytest.raises(TublubError, match="binary"):
+            _default_export_handle("xlsx", stdout=TTYStdout(io.BytesIO()))
+
+    def test_default_handle_binary_to_piped_stdout(self, sample_data):
         """Binary export to non-TTY stdout should use stdout.buffer."""
-        chunks = []
-        fake_buffer = type("buf", (), {"write": lambda self, d: chunks.append(d)})()
-        fake_stdout = type(
-            "fake_stdout", (), {"isatty": lambda self: False, "buffer": fake_buffer}
-        )()
-        monkeypatch.setattr(sys, "stdout", fake_stdout)
-        export_dataset(sample_data, "xlsx", extra_args={})
-        assert len(chunks) == 1
-        assert isinstance(chunks[0], bytes)
+        raw = io.BytesIO()
+        stdout = io.TextIOWrapper(raw)  # kept alive: GC would close raw
+        handle = _default_export_handle("xlsx", stdout=stdout)
+        export_dataset(sample_data, "xlsx", extra_args={}, file_handle=handle)
+        assert raw.getvalue().startswith(b"PK")  # XLSX is a zip container
+
+    def test_default_handle_text_returns_stream(self):
+        stream = io.StringIO()
+        assert _default_export_handle("json", stdout=stream) is stream
 
     def test_export_text_to_non_tty(self, sample_data, tmp_path):
         out = tmp_path / "piped.json"
@@ -311,10 +314,9 @@ class TestParseCommandLine:
         args, extra = parse_command_line(["--skip-lines", "2", str(sample_csv)])
         assert extra["skip_lines"] == 2
 
-    def test_no_input_exits(self, monkeypatch):
-        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    def test_no_input_exits(self):
         with pytest.raises(SystemExit):
-            parse_command_line([])
+            parse_command_line([], stdin_isatty=True)
 
     def test_nonexistent_file_exits(self):
         with pytest.raises(SystemExit):
@@ -342,11 +344,10 @@ class TestParseCommandLine:
         with pytest.raises(SystemExit):
             parse_command_line([flag, "csv", str(sample_csv)])
 
-    def test_bare_l_requires_input_file(self, monkeypatch):
+    def test_bare_l_requires_input_file(self):
         """-l is now --list-sheets, so it needs an input file."""
-        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
         with pytest.raises(SystemExit):
-            parse_command_line(["-l"])
+            parse_command_line(["-l"], stdin_isatty=True)
 
     def test_delimiter_extra_arg(self, sample_csv):
         args, extra = parse_command_line(["-d", ";", str(sample_csv)])
@@ -383,72 +384,70 @@ class TestBuildArgumentParser:
 
 class TestLoadDatasetStdin:
     @pytest.mark.parametrize("fmt", ["csv", "json", "xlsx"])
-    def test_auto_detect(self, monkeypatch, sample_data, fmt):
+    def test_auto_detect(self, sample_data, fmt):
         raw = sample_data.export(fmt)
         if isinstance(raw, str):
             raw = raw.encode()
-        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(raw)))
-        ds = load_dataset_stdin()
+        ds = load_dataset_stdin(stdin=io.BytesIO(raw))
         assert len(ds) == 2
         assert ds.headers is not None
         assert "name" in ds.headers
 
-    def test_explicit_format(self, monkeypatch):
+    def test_explicit_format(self):
         csv_bytes = b"name,age\nAlice,30\n"
-        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(csv_bytes)))
-        ds = load_dataset_stdin(in_format="csv")
+        ds = load_dataset_stdin(in_format="csv", stdin=io.BytesIO(csv_bytes))
         assert len(ds) == 1
 
-    def test_extra_args_passed(self, monkeypatch):
+    def test_extra_args_passed(self):
         csv_bytes = b"# comment\nname,age\nAlice,30\n"
-        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(csv_bytes)))
-        ds = load_dataset_stdin(in_format="csv", extra_args={"skip_lines": 1})
+        ds = load_dataset_stdin(
+            in_format="csv",
+            extra_args={"skip_lines": 1},
+            stdin=io.BytesIO(csv_bytes),
+        )
         assert len(ds) == 1
         assert ds.headers == ["name", "age"]
 
-    def test_empty_stdin_raises(self, monkeypatch):
-        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"")))
+    def test_empty_stdin_raises(self):
         with pytest.raises(TublubError, match="No data received"):
-            load_dataset_stdin()
+            load_dataset_stdin(stdin=io.BytesIO(b""))
 
-    def test_single_column_heuristic(self, monkeypatch):
+    def test_single_column_heuristic(self):
         """Single-column data on stdin should be detected as TSV via heuristic."""
-        raw = b"name\nAlice\nBob\n"
-        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(raw)))
-        ds = load_dataset_stdin()
+        ds = load_dataset_stdin(stdin=io.BytesIO(b"name\nAlice\nBob\n"))
         assert len(ds) == 2
         assert ds.headers == ["name"]
 
-    def test_undetectable_format_raises(self, monkeypatch):
-        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"???")))
+    def test_undetectable_format_raises(self):
         with pytest.raises(TublubError, match=r"Unable to detect.*-f"):
-            load_dataset_stdin()
+            load_dataset_stdin(stdin=io.BytesIO(b"???"))
 
 
 # --- parse_command_line stdin ---
 
 
 class TestParseCommandLineStdin:
-    def test_dash_sets_stdin_flag(self, monkeypatch):
-        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-        args, _ = parse_command_line(["-", "-t", "json"])
+    def test_dash_sets_stdin_flag(self):
+        args, _ = parse_command_line(["-", "-t", "json"], stdin_isatty=True)
         assert args.stdin is True
         assert args.infiles == []
 
-    def test_implicit_stdin_when_piped(self, monkeypatch):
-        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-        args, _ = parse_command_line(["-t", "json"])
+    def test_implicit_stdin_when_piped(self):
+        args, _ = parse_command_line(["-t", "json"], stdin_isatty=False)
         assert args.stdin is True
 
-    def test_in_format_flag(self, monkeypatch):
-        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-        args, _ = parse_command_line(["-f", "csv", "-t", "json"])
+    def test_no_implicit_stdin_on_tty(self):
+        """An interactive TTY with no input is a usage error, not stdin."""
+        with pytest.raises(SystemExit):
+            parse_command_line(["-t", "json"], stdin_isatty=True)
+
+    def test_in_format_flag(self):
+        args, _ = parse_command_line(["-f", "csv", "-t", "json"], stdin_isatty=False)
         assert args.in_format == "csv"
 
-    def test_invalid_in_format_exits(self, monkeypatch):
-        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    def test_invalid_in_format_exits(self):
         with pytest.raises(SystemExit):
-            parse_command_line(["-f", "bogus", "-t", "json"])
+            parse_command_line(["-f", "bogus", "-t", "json"], stdin_isatty=False)
 
     def test_in_format_with_file(self, sample_csv):
         args, _ = parse_command_line(["-f", "csv", str(sample_csv)])
@@ -659,26 +658,18 @@ class TestLoadDatabookFile:
 
 
 class TestLoadDatabookStdin:
-    def test_multi_sheet_xlsx_from_stdin(self, multi_sheet_xlsx, monkeypatch):
-        monkeypatch.setattr(
-            sys, "stdin", io.TextIOWrapper(io.BytesIO(multi_sheet_xlsx.read_bytes()))
-        )
-        book = load_databook_stdin()
+    def test_multi_sheet_xlsx_from_stdin(self, multi_sheet_xlsx):
+        book = load_databook_stdin(stdin=io.BytesIO(multi_sheet_xlsx.read_bytes()))
         assert book is not None
         assert book.size == 2
 
-    def test_csv_from_stdin_returns_none(self, monkeypatch):
-        monkeypatch.setattr(
-            sys,
-            "stdin",
-            io.TextIOWrapper(io.BytesIO(b"name,age\nAlice,30\nBob,25\n")),
-        )
-        assert load_databook_stdin() is None
+    def test_csv_from_stdin_returns_none(self):
+        stdin = io.BytesIO(b"name,age\nAlice,30\nBob,25\n")
+        assert load_databook_stdin(stdin=stdin) is None
 
-    def test_empty_stdin_raises(self, monkeypatch):
-        monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"")))
+    def test_empty_stdin_raises(self):
         with pytest.raises(TublubError, match="No data"):
-            load_databook_stdin()
+            load_databook_stdin(stdin=io.BytesIO(b""))
 
 
 # --- parse_command_line: multi-input mode ---
@@ -710,11 +701,10 @@ class TestParseCommandLineMultiInput:
         with pytest.raises(SystemExit):
             parse_command_line(["-o", str(out), "-", str(sample_csv)])
 
-    def test_o_with_no_inputs_and_tty_exits(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    def test_o_with_no_inputs_and_tty_exits(self, tmp_path):
         out = tmp_path / "out.json"
         with pytest.raises(SystemExit):
-            parse_command_line(["-o", str(out)])
+            parse_command_line(["-o", str(out)], stdin_isatty=True)
 
     def test_nonexistent_input_in_multi_exits(self, sample_csv, tmp_path):
         out = tmp_path / "book.xlsx"
@@ -726,23 +716,17 @@ class TestParseCommandLineMultiInput:
 
 
 class TestCliDatabook:
-    def test_multi_input_to_xlsx(self, sample_csv, sample_json, tmp_path, monkeypatch):
+    def test_multi_input_to_xlsx(self, sample_csv, sample_json, tmp_path):
         out = tmp_path / "book.xlsx"
-        monkeypatch.setattr(
-            sys, "argv", ["tublub", "-o", str(out), str(sample_csv), str(sample_json)]
-        )
-        rc = cli()
+        rc = cli(["-o", str(out), str(sample_csv), str(sample_json)])
         assert rc == 0
         loaded = tablib.Databook().load(out.read_bytes(), format="xlsx")
         assert loaded.size == 2
 
-    def test_unsupported_output_exits(self, sample_csv, tmp_path, monkeypatch):
+    def test_unsupported_output_exits(self, sample_csv, tmp_path):
         out = tmp_path / "book.csv"
-        monkeypatch.setattr(
-            sys, "argv", ["tublub", "-o", str(out), str(sample_csv), str(sample_csv)]
-        )
         with pytest.raises(SystemExit):
-            cli()
+            cli(["-o", str(out), str(sample_csv), str(sample_csv)])
 
 
 # --- --list-sheets ---
@@ -753,11 +737,8 @@ class TestListSheets:
         args, _ = parse_command_line(["--list-sheets", str(sample_csv)])
         assert args.list_sheets is True
 
-    def test_xlsx_lists_all_sheets(self, multi_sheet_xlsx, capsys, monkeypatch):
-        monkeypatch.setattr(
-            sys, "argv", ["tublub", "--list-sheets", str(multi_sheet_xlsx)]
-        )
-        rc = cli()
+    def test_xlsx_lists_all_sheets(self, multi_sheet_xlsx, capsys):
+        rc = cli(["--list-sheets", str(multi_sheet_xlsx)])
         out = capsys.readouterr().out
         assert rc == 0
         lines = out.strip().splitlines()
@@ -765,21 +746,19 @@ class TestListSheets:
         assert lines[0] == "[0] people  2 rows x 2 cols"
         assert lines[1] == "[1] cities  2 rows x 2 cols"
 
-    def test_csv_falls_back_to_dataset(self, sample_csv, capsys, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["tublub", "--list-sheets", str(sample_csv)])
-        rc = cli()
+    def test_csv_falls_back_to_dataset(self, sample_csv, capsys):
+        rc = cli(["--list-sheets", str(sample_csv)])
         out = capsys.readouterr().out
         assert rc == 0
         lines = out.strip().splitlines()
         assert len(lines) == 1
         assert lines[0] == f"[0] {sample_csv.stem}  2 rows x 3 cols"
 
-    def test_unknown_format_exits(self, tmp_path, monkeypatch):
+    def test_unknown_format_exits(self, tmp_path):
         bogus = tmp_path / "mystery.xyz"
         bogus.write_bytes(b"\x00\x01\x02not-a-known-format")
-        monkeypatch.setattr(sys, "argv", ["tublub", "--list-sheets", str(bogus)])
         with pytest.raises(SystemExit):
-            cli()
+            cli(["--list-sheets", str(bogus)])
 
     def test_combined_with_output_rejected(self, sample_csv, tmp_path):
         out = tmp_path / "out.xlsx"
@@ -794,10 +773,9 @@ class TestListSheets:
         with pytest.raises(SystemExit):
             parse_command_line(["--list-sheets", "--list-formats", str(sample_csv)])
 
-    def test_no_input_rejected(self, monkeypatch):
-        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    def test_no_input_rejected(self):
         with pytest.raises(SystemExit):
-            parse_command_line(["--list-sheets"])
+            parse_command_line(["--list-sheets"], stdin_isatty=True)
 
     def test_two_inputs_rejected(self, sample_csv, sample_json):
         with pytest.raises(SystemExit):

@@ -118,6 +118,17 @@ containing commas aren't split). This *inverted* the earlier (2024) behaviour
 that trusted the extension first and only fell back to content on failure;
 see [`decisions.md` 004](decisions.md).
 
+### Injectable IO edges
+Every function that touches a `sys` stream or TTY state takes an optional
+keyword-only parameter defaulting to `None`, resolved to the real `sys`
+object inside the body at call time — `cli(argv)`,
+`parse_command_line(..., stdin_isatty=...)`, `stdin: IO[bytes]` on the stdin
+loaders, `stdout: TextIO` on `_default_export_handle`. Tests inject values
+instead of monkeypatching globals; no wrapper/console object (the 009
+rationale), and never a `sys.*` default in the signature (it would be
+captured at definition time — the 0.4.0 bug). New IO edges must follow this
+pattern. See [`decisions.md` 020](decisions.md).
+
 ### Single-sheet targets never auto-split
 Single-sheet output formats (csv/tsv/dbf/cli/jira/latex/sql/...) never
 silently fan a multi-sheet input out into multiple files. The user must pick

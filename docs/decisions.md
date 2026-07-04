@@ -476,3 +476,36 @@ they should never need to know about. "Multi-sheet" says exactly what
 "Databook" means without requiring a trip to Tablib's docs. Applied
 retroactively to the shipped 0.5.0 message and help text (CHANGELOG
 `[Unreleased]`).
+
+---
+
+### 020. Injectable IO edges via optional keyword params, not a console object
+*2026-07-04 · Accepted*
+
+**Context.** Tests reached the CLI's IO edges only by monkeypatching process
+globals: `sys.argv` for every `cli()` integration test, `sys.stdin.isatty`
+for the implicit-stdin inference, `sys.stdin` itself (wrapped BytesIO) for
+the stdin loaders, and hand-built fake `sys.stdout` objects for the export
+handle. The multi-sheet roadmap multiplies exactly these paths (TODO 5 adds
+a stderr TTY gate, TODO 7 routes three flags through stdin).
+
+**Decision.** Every function that touches a `sys` stream or TTY state takes
+an optional keyword-only parameter defaulting to `None`, resolved to the
+real `sys` object *inside the body at call time*: `cli(argv)`,
+`parse_command_line(argv, stdin_isatty=...)` (threaded to
+`_should_use_implicit_stdin`, which probes the real stdin only after the
+cheap checks so file-input invocations never touch it),
+`stdin: IO[bytes]` on `_read_and_detect_stdin` and the three stdin loaders,
+and `stdout: TextIO` on `_default_export_handle`. Tests inject argv lists,
+booleans, and `BytesIO`/`TextIOWrapper` objects; no `monkeypatch.setattr(sys,
+...)` remains. Did *not* introduce a `Console`/IO-context wrapper object.
+
+**Why.** Injection keeps helpers reusable outside the CLI (003) — the stdin
+loaders now accept any binary stream — and makes tests state exactly which
+edge they exercise instead of mutating global state. A wrapper object was
+rejected for the same reason as `InputSpec` in 009: more machinery than the
+problem warrants. Defaults are `None`-resolved in the body, never in the
+signature, because a `sys.stdout` default is captured at definition time —
+the exact bug fixed in 0.4.0. New IO edges (TODO 5's stderr TTY gate,
+TODO 7's stdin routing) must follow this pattern. Internal refactor, no
+CHANGELOG entry.

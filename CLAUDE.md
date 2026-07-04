@@ -57,5 +57,9 @@ Always update `CHANGELOG.md` under the `[Unreleased]` section when making user-f
 
 - Verifying CLI error paths: `just run` swallows stderr and only reports the exit code on failure. Run `uv run tublub ARGS` directly to see the actual `parser.error`/`sys.exit` message.
 - Argparse unit tests: call `parse_command_line(argv)` directly and assert on the returned `args`.
-- CLI integration tests: `monkeypatch.setattr(sys, "argv", [...])`, call `cli()`, read `capsys.readouterr().out`.
+- CLI integration tests: call `cli([...])` with an argv list, read `capsys.readouterr().out`.
+- Don't monkeypatch `sys` globals — the IO edges take injection params (decision 020):
+  `parse_command_line(argv, stdin_isatty=True/False)` for input-presence/implicit-stdin
+  paths, `stdin=io.BytesIO(...)` for the stdin loaders, `stdout=` for
+  `_default_export_handle`.
 - Rejection tests use `pytest.raises(SystemExit)` since `parser.error()` exits.

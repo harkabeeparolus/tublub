@@ -11,7 +11,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, TextIO
 
 import tablib
 import tablib.formats
@@ -57,9 +57,9 @@ FORMATS: dict[str, FormatConfig] = {
 _DEFAULT_FMT = FormatConfig()
 
 
-def cli() -> int:
-    """Run the command line interface."""
-    args, extra_args = parse_command_line()
+def cli(argv: list[str] | None = None) -> int:
+    """Run the command line interface (argv defaults to sys.argv)."""
+    args, extra_args = parse_command_line(argv)
 
     if args.list_formats:
         print("Available formats:", " ".join(get_formats()))
@@ -282,16 +282,22 @@ def _detect_format_from_bytes(raw: bytes) -> str | None:
 
 
 def load_dataset_stdin(
-    in_format: str | None = None, extra_args: dict[str, Any] | None = None
+    in_format: str | None = None,
+    extra_args: dict[str, Any] | None = None,
+    *,
+    stdin: IO[bytes] | None = None,
 ) -> tablib.Dataset:
-    """Load a dataset from stdin."""
-    raw, fmt, extra_load_args = _read_and_detect_stdin(in_format, extra_args)
+    """Load a dataset from stdin (or any injected binary stream)."""
+    raw, fmt, extra_load_args = _read_and_detect_stdin(in_format, extra_args, stdin)
     data = raw if is_bin(fmt) else raw.decode()
     return tablib.import_set(data, format=fmt, **extra_load_args)
 
 
 def load_databook_stdin(
-    in_format: str | None = None, extra_args: dict[str, Any] | None = None
+    in_format: str | None = None,
+    extra_args: dict[str, Any] | None = None,
+    *,
+    stdin: IO[bytes] | None = None,
 ) -> tablib.Databook | None:
     """Try to load a multi-sheet Tablib Databook from stdin.
 
@@ -301,7 +307,7 @@ def load_databook_stdin(
     be consumed once, so callers must choose this helper or
     load_dataset_stdin per invocation, not both.
     """
-    raw, fmt, extra_load_args = _read_and_detect_stdin(in_format, extra_args)
+    raw, fmt, extra_load_args = _read_and_detect_stdin(in_format, extra_args, stdin)
     data = raw if is_bin(fmt) else raw.decode()
     try:
         return tablib.Databook().load(data, format=fmt, **extra_load_args)
@@ -328,6 +334,8 @@ def try_load_file(
 def try_load_stdin(
     in_format: str | None = None,
     extra_args: dict[str, Any] | None = None,
+    *,
+    stdin: IO[bytes] | None = None,
 ) -> tablib.Databook | tablib.Dataset:
     """Load stdin, returning a Databook when possible, else a Dataset.
 
@@ -335,7 +343,7 @@ def try_load_stdin(
     so callers don't need to choose load_databook_stdin vs
     load_dataset_stdin up front (stdin can only be consumed once).
     """
-    raw, fmt, extra_load_args = _read_and_detect_stdin(in_format, extra_args)
+    raw, fmt, extra_load_args = _read_and_detect_stdin(in_format, extra_args, stdin)
     data = raw if is_bin(fmt) else raw.decode()
     try:
         return tablib.Databook().load(data, format=fmt, **extra_load_args)
@@ -346,14 +354,17 @@ def try_load_stdin(
 def _read_and_detect_stdin(
     in_format: str | None,
     extra_args: dict[str, Any] | None,
+    stdin: IO[bytes] | None = None,
 ) -> tuple[bytes, str, dict[str, Any]]:
     """Read stdin once, detect its format, and filter load kwargs.
 
-    Returns (raw_bytes, format, filtered_load_kwargs).
+    Returns (raw_bytes, format, filtered_load_kwargs). stdin substitutes
+    any binary stream for the real sys.stdin.buffer (resolved at call
+    time, so tests can inject a BytesIO without patching global state).
     """
     if extra_args is None:
         extra_args = {}
-    raw = sys.stdin.buffer.read()
+    raw = (sys.stdin.buffer if stdin is None else stdin).read()
     if not raw:
         msg = "No data received on stdin"
         raise TublubError(msg)
@@ -479,14 +490,23 @@ def export_dataset(
     file_handle.write(output)
 
 
-def _default_export_handle(target_format: str) -> IO[str] | IO[bytes]:
-    """Pick a stdout stream for the format, or raise for binary-to-TTY."""
+def _default_export_handle(
+    target_format: str, stdout: TextIO | None = None
+) -> IO[str] | IO[bytes]:
+    """Pick a stdout stream for the format, or raise for binary-to-TTY.
+
+    stdout substitutes any text stream (with a .buffer) for the real
+    sys.stdout, resolved at call time so tests can inject one without
+    patching global state.
+    """
+    if stdout is None:
+        stdout = sys.stdout
     if is_bin(target_format):
-        if sys.stdout.isatty():
+        if stdout.isatty():
             msg = f"Format {target_format} is binary, not printing to console!"
             raise TublubError(msg)
-        return sys.stdout.buffer
-    return sys.stdout
+        return stdout.buffer
+    return stdout
 
 
 def filter_args(
@@ -533,8 +553,15 @@ def is_bin(data_format: str | None) -> bool:
 
 def parse_command_line(
     argv: list[str] | None = None,
+    *,
+    stdin_isatty: bool | None = None,
 ) -> tuple[argparse.Namespace, dict[str, Any]]:
-    """Parse and return input arguments."""
+    """Parse and return input arguments.
+
+    stdin_isatty overrides the sys.stdin.isatty() probe used for implicit
+    stdin inference, so tests can exercise both cases without patching
+    global state (None means: ask the real stdin).
+    """
     parser = build_argument_parser()
     args = parser.parse_args(argv)
 
@@ -547,7 +574,7 @@ def parse_command_line(
     if infiles == [_DASH]:
         infiles = []
         args.stdin = True
-    elif _should_use_implicit_stdin(infiles, args):
+    elif _should_use_implicit_stdin(infiles, args, stdin_isatty=stdin_isatty):
         args.stdin = True
 
     args.outfile = outfile
@@ -558,15 +585,28 @@ def parse_command_line(
     return args, _collect_extra_args(args)
 
 
-def _should_use_implicit_stdin(infiles: list[Path], args: argparse.Namespace) -> bool:
+def _should_use_implicit_stdin(
+    infiles: list[Path],
+    args: argparse.Namespace,
+    *,
+    stdin_isatty: bool | None = None,
+) -> bool:
     """Whether to read stdin even though no '-' was given on the command line.
 
     True when nothing was passed on the command line and stdin is a pipe
     (not a TTY), so `cmd | tublub` works without an explicit '-'. An
     interactive TTY with no input is a usage error, not stdin, so we
     return False there and let validation report "No input data provided."
+
+    The real sys.stdin.isatty() is probed only when stdin_isatty is None,
+    and only after the cheap checks, so file-input invocations (and tests
+    passing an explicit value) never touch the real stdin.
     """
-    return not infiles and not args.list_formats and not sys.stdin.isatty()
+    if infiles or args.list_formats:
+        return False
+    if stdin_isatty is None:
+        stdin_isatty = sys.stdin.isatty()
+    return not stdin_isatty
 
 
 def _collect_extra_args(args: argparse.Namespace) -> dict[str, Any]:
