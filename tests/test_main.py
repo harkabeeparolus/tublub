@@ -288,9 +288,9 @@ class TestExportDataset:
 
 
 class TestParseCommandLine:
-    def test_list_flag(self):
-        args, extra = parse_command_line(["--list"])
-        assert args.list is True
+    def test_list_formats_flag(self):
+        args, extra = parse_command_line(["--list-formats"])
+        assert args.list_formats is True
 
     def test_infile_only(self, sample_csv):
         args, extra = parse_command_line([str(sample_csv)])
@@ -324,9 +324,29 @@ class TestParseCommandLine:
         with pytest.raises(SystemExit):
             parse_command_line(["-t", "bogus", str(sample_csv)])
 
-    def test_list_with_file_exits(self, sample_csv):
+    def test_list_formats_with_file_exits(self, sample_csv):
         with pytest.raises(SystemExit):
-            parse_command_line(["--list", str(sample_csv)])
+            parse_command_line(["--list-formats", str(sample_csv)])
+
+    def test_from_flag_sets_in_format(self, sample_csv):
+        args, _ = parse_command_line(["--from", "csv", str(sample_csv)])
+        assert args.in_format == "csv"
+
+    def test_to_flag_sets_out_format(self, sample_csv):
+        args, _ = parse_command_line(["--to", "json", str(sample_csv)])
+        assert args.out_format == "json"
+
+    @pytest.mark.parametrize("flag", ["--list", "--in-format", "--format"])
+    def test_dropped_spellings_rejected(self, sample_csv, flag):
+        """The old long forms fail loud, never silently change meaning."""
+        with pytest.raises(SystemExit):
+            parse_command_line([flag, "csv", str(sample_csv)])
+
+    def test_bare_l_requires_input_file(self, monkeypatch):
+        """-l is now --list-sheets, so it needs an input file."""
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+        with pytest.raises(SystemExit):
+            parse_command_line(["-l"])
 
     def test_delimiter_extra_arg(self, sample_csv):
         args, extra = parse_command_line(["-d", ";", str(sample_csv)])
@@ -770,9 +790,9 @@ class TestListSheets:
         with pytest.raises(SystemExit):
             parse_command_line(["--list-sheets", "-t", "csv", str(sample_csv)])
 
-    def test_combined_with_list_rejected(self, sample_csv):
+    def test_combined_with_list_formats_rejected(self, sample_csv):
         with pytest.raises(SystemExit):
-            parse_command_line(["--list-sheets", "--list", str(sample_csv)])
+            parse_command_line(["--list-sheets", "--list-formats", str(sample_csv)])
 
     def test_no_input_rejected(self, monkeypatch):
         monkeypatch.setattr(sys.stdin, "isatty", lambda: True)

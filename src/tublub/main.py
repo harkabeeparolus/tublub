@@ -61,7 +61,7 @@ def cli() -> int:
     """Run the command line interface."""
     args, extra_args = parse_command_line()
 
-    if args.list:
+    if args.list_formats:
         print("Available formats:", " ".join(get_formats()))
         return 0
     if args.list_sheets:
@@ -566,7 +566,7 @@ def _should_use_implicit_stdin(infiles: list[Path], args: argparse.Namespace) ->
     interactive TTY with no input is a usage error, not stdin, so we
     return False there and let validation report "No input data provided."
     """
-    return not infiles and not args.list and not sys.stdin.isatty()
+    return not infiles and not args.list_formats and not sys.stdin.isatty()
 
 
 def _collect_extra_args(args: argparse.Namespace) -> dict[str, Any]:
@@ -608,12 +608,12 @@ def _validate_list_sheets(
     parser: argparse.ArgumentParser, args: argparse.Namespace
 ) -> None:
     """Reject flag combinations and input shapes incompatible with --list-sheets."""
-    if args.list:
-        parser.error("Can not combine --list-sheets with --list")
+    if args.list_formats:
+        parser.error("Can not combine --list-sheets with --list-formats")
     if args.outfile:
         parser.error("Can not combine --list-sheets with -o/--output")
     if args.out_format:
-        parser.error("Can not combine --list-sheets with -t/--format")
+        parser.error("Can not combine --list-sheets with -t/--to")
     if args.stdin:
         parser.error("--list-sheets does not yet support stdin input")
     if not args.infiles:
@@ -624,13 +624,13 @@ def _validate_list_sheets(
 
 def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     """Validate parsed args; calls parser.error (which exits) on problems."""
-    if args.list and (args.infiles or args.outfile):
-        parser.error("Can not combine --list with filename(s)")
+    if args.list_formats and (args.infiles or args.outfile):
+        parser.error("Can not combine --list-formats with filename(s)")
 
     if args.list_sheets:
         _validate_list_sheets(parser, args)
 
-    if not args.list and not args.infiles and not args.stdin:
+    if not args.list_formats and not args.infiles and not args.stdin:
         parser.error("No input data provided.")
 
     for f in args.infiles:
@@ -651,13 +651,16 @@ def _check_known_format(
 
 def build_argument_parser() -> argparse.ArgumentParser:
     """Parse and return command line arguments."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog=f"available formats: {' '.join(get_formats())}",
+    )
     parser.add_argument(
         "-V", "--version", action="version", version=f"%(prog)s {__version__}"
     )
     parser.add_argument(
-        "-l",
-        "--list",
+        "--list-formats",
+        dest="list_formats",
         action="store_true",
         help="list the available file formats and exit",
     )
@@ -700,12 +703,13 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     input_group.add_argument(
         "-f",
-        "--in-format",
+        "--from",
         metavar="FMT",
         dest="in_format",
         help="override input format (e.g. for .txt files or undetectable content)",
     )
     input_group.add_argument(
+        "-l",
         "--list-sheets",
         dest="list_sheets",
         action="store_true",
@@ -715,7 +719,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     output_group = parser.add_argument_group(title="output options")
     output_group.add_argument(
         "-t",
-        "--format",
+        "--to",
         metavar="FMT",
         dest="out_format",
         help="output format (default: outfile extension, or none)",

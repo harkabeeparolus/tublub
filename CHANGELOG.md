@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Changed
 
+* **Breaking:** `-l` now lists the *sheets* in an input file (was
+  `--list-sheets`); it is the short form for the everyday operation.
+  Listing the supported *formats* moves to the long-only `--list-formats`.
+  The bare `--list` spelling is gone — it now errors as an ambiguous option
+  (it could mean either new flag), which is the migration hint.
+* **Breaking:** the input/output format flags gain pandoc's long names,
+  `-f/--from` and `-t/--to`. The old long forms `--in-format` and `--format`
+  are removed and now error as unrecognized arguments; the short flags `-f`
+  and `-t` are unchanged.
+* `--help` now lists the available formats in its epilog, so format discovery
+  no longer requires `--list-formats`.
 * Error messages and `--help` text no longer mention Tablib's internal
   `Databook` type; they say "multi-sheet" instead (e.g. "Format 'csv' does
   not support multi-sheet output").
