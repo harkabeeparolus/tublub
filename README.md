@@ -40,8 +40,8 @@ Saved 'book.xlsx', 3 sheets (xlsx)
 ```
 
 With `-o`, all positional arguments are inputs. Two or more inputs become
-sheets in a single Databook (XLSX, ODS, JSON, YAML, ...); sheet names default
-to each input file's stem.
+sheets in a single multi-sheet file (XLSX, ODS, JSON, YAML, ...); sheet names
+default to each input file's stem.
 
 To inspect a multi-sheet input without converting it, use `--list-sheets`:
 

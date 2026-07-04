@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Changed
+
+* Error messages and `--help` text no longer mention Tablib's internal
+  `Databook` type; they say "multi-sheet" instead (e.g. "Format 'csv' does
+  not support multi-sheet output").
+
 ## [0.5.0] - 2026-05-29
 
 ### Added

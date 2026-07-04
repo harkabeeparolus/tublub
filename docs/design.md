@@ -66,6 +66,11 @@ narrowing, prefer an explicit `if x is None: raise TublubError(...)` or a
 helper with an already-narrow return type over `assert`/`cast` (S101 forbids
 `assert` in `src/`).
 
+User-facing text (error messages, warnings, hints, `--help`, README) speaks
+the user's vocabulary — "sheet(s)", "multi-sheet" — never Tablib's internal
+type names (`Dataset`, `Databook`); those belong in code and dev docs only
+(see [`decisions.md` 019](decisions.md)).
+
 ### Dataset vs Databook
 A single sheet is a `tablib.Dataset`; a multi-sheet workbook is a
 `tablib.Databook`. Most load/save operations have both flavours. The

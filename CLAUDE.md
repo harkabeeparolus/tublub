@@ -41,6 +41,9 @@ Always update `CHANGELOG.md` under the `[Unreleased]` section when making user-f
 - Library helpers raise `TublubError` for user-facing problems; only `cli()`
   catches it and converts to `sys.exit(msg)`. Keep new helpers consistent so
   they remain reusable outside the CLI.
+- User-facing strings (errors, warnings, hints, `--help`, README) never name
+  Tablib internals like `Dataset`/`Databook` — say "sheet(s)"/"multi-sheet"
+  (decision 019). Internal names are fine in code, docstrings, and dev docs.
 
 ## Ruff gotchas
 

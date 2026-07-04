@@ -412,7 +412,7 @@ def save_databook_file(
     try:
         output = book.export(file_format, **extra_save_args)
     except tablib.UnsupportedFormat as exc:
-        msg = f"Format {file_format!r} does not support multi-sheet (Databook) output"
+        msg = f"Format {file_format!r} does not support multi-sheet output"
         raise TublubError(msg) from exc
 
     with _open_for_format(file_name, cfg, write=True) as fh:
@@ -597,7 +597,7 @@ def _reconcile_positionals(
     if len(raw_inputs) > _MIN_DATABOOK_INPUTS:
         parser.error(
             "Too many positional arguments; "
-            "use -o/--output for multi-input Databook output"
+            "use -o/--output to combine multiple input files"
         )
     infiles: list[Path] = [raw_inputs[0]] if raw_inputs else []
     outfile = raw_inputs[1] if len(raw_inputs) >= _MIN_DATABOOK_INPUTS else None
@@ -726,8 +726,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         type=Path,
         help=(
-            "output file; with multiple inputs, build a multi-sheet "
-            "Databook (e.g. XLSX, ODS, JSON)"
+            "output file; with multiple inputs, combine them into one "
+            "multi-sheet file (e.g. XLSX, ODS, JSON)"
         ),
     )
     output_group.add_argument(

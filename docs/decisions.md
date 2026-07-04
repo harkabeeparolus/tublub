@@ -347,3 +347,132 @@ loaded type or consulting a format table. Always-index keeps token resolution
 predictable; a numeric *title* is a vanishing edge not worth the typo-masking
 cost of an index-then-title fallback. This reverses the TODO 3 draft and changes
 `--list-sheets` output shipped in 0.5.0. (Commit: pending the TODO 3 changeset.)
+
+---
+
+### 017. Selection follows structure and is orthogonal to output; supersedes 016's rejection rule
+*2026-07-04 · Accepted*
+
+**Context.** A design review of the multi-sheet roadmap (2026-07-04) found two
+flaws in the 016-era spec. First, 016's blanket rejection of `--sheet` on any
+single-sheet input recreated the false-affordance problem it was written to
+fix, mirrored: `--list-sheets` prints the real title of a one-sheet XLSX, but
+passing that title to `--sheet` was rejected; TODO 4's "csv can't take a
+Databook — pass `--sheet`" advice and 016's rejection pointed at each other in
+a circle on one-sheet workbooks; and scripts like `--sheet Data monthly.xlsx`
+broke precisely on the degenerate month where the workbook contains only
+`Data`. Second, the draft entangled selection *arity* with output *mode*:
+`--sheet A,B` refused to print to the terminal (error pointing at
+`--all-sheets`, which shows all sheets, not the requested two) while
+`--all-sheets` printed happily, and the analogous split existed for `-t`
+stdout export.
+
+**Decision.**
+- **Selectability = observed structure.** An input that loaded as a `Databook`
+  — *any* size, including 1 — has real sheets with real indices and titles;
+  `--sheet` resolves against them normally. Only a fallback `Dataset`
+  (CSV, records-shaped JSON) is rejected, with the observational message
+  "input has no sheet structure". An empty workbook errors
+  "workbook has no sheets".
+- **`--list-sheets` output matches.** Every Databook, size-1 included, prints
+  uniform `[idx] title  N rows x M cols` lines (restoring the index 016
+  dropped — it is a true affordance now). A fallback Dataset prints one bare
+  `N rows x M cols` line: no index, no title, nothing to select. Rule of
+  thumb: whatever `--list-sheets` shows is exactly what `--sheet` accepts.
+- **Selection is orthogonal to output.** `--sheet` picks a set of sheets and
+  never changes which output modes are legal. One selected sheet takes the
+  single-Dataset path; N sheets behave as a Databook of N sheets everywhere a
+  Databook works — heading-separated terminal print, `-o` save, `-t` stdout
+  export via the attempt-and-catch pattern (008). `--all-sheets` is sugar for
+  "select everything" sharing the same code path. Because `--all-sheets`
+  names no specific structure, it never fails on sheet-count grounds: on a
+  structureless input it is the identity modifier (plain single render).
+- **Token grammar hardening.** A `--sheet` argument is comma-split only when
+  every comma-piece is an integer; otherwise the whole argument is one
+  literal title token (protects titles like "Revenue, EMEA"). A `name:`
+  prefix forces title interpretation (escape hatch for numeric titles like
+  `2024`; the out-of-range index error mentions it when a matching title
+  exists; a literal title starting with `name:` needs the prefix doubled).
+  Ambiguous title matches — duplicate exact titles (legal in JSON/YAML
+  books) or multiple case-insensitive hits — error listing the candidate
+  indices rather than picking one. Title matching skips empty titles; index
+  selection reaches everything.
+- **Multi-input mode stays blunt.** `--sheet`/`--all-sheets` with 2+ inputs
+  is an error ("not supported with multiple inputs"); expansion takes every
+  sheet of every input. Per-input selection is deferred to the reserved
+  `book.xlsx::Sheet1` syntax.
+
+**Why.** Uniform interfaces are the robust choice (`head -1` works on
+one-line files; `jq '.[0]'` works on singleton arrays): a request that is
+unambiguous and satisfiable should not fail because the input is
+degenerate-but-valid. Tying selectability to *observed structure* keeps
+everything 016 actually cared about — no fabricated identities, no capability
+claims, fully 008-safe (structure is discovered by the load attempt, not a
+table) — while killing the list-shows-it-but-rejects-it inconsistency and the
+error circle. Orthogonality is what makes the surface memorable: the `head`
+precedent (one file bare, several files get `==>` headers) shows arity
+changing *presentation*, never *legality*. This supersedes 016's rejection
+clause and its single-sheet `--list-sheets` format; 016's other clauses stand
+unchanged (0-based, integer tokens are always indices, exact-then-case-
+insensitive title match, observational error wording). (Recorded with the
+2026-07-04 TODO respec.)
+
+---
+
+### 018. Flag surface: `-l` moves to `--list-sheets`; `--list` becomes `--list-formats`; pandoc's `--from`/`--to`; `-s`
+*2026-07-04 · Accepted*
+
+**Context.** `-l/--list` was assigned to listing *formats* before multi-sheet
+support existed. Listing formats is a rare, one-time discovery operation;
+listing a workbook's *sheets* is the everyday one. tublub is zerover and
+effectively single-user, so a coherent breaking rename is cheap now and
+expensive later. The long-option pair `--in-format`/`--format` also undercuts
+the `-f`/`-t` from/to mnemonic (bare `--format` surprisingly means *output*).
+
+**Decision.**
+- `-l` is reassigned to `--list-sheets`. `--list` is renamed to
+  `--list-formats` (long-only). **No `--list` alias is kept**: with both new
+  long flags defined, argparse's default prefix matching turns `--list` into
+  an "ambiguous option: could match --list-formats, --list-sheets" error —
+  a self-explaining migration message (so keep `allow_abbrev` on).
+- Replace the long forms outright: `-f/--from` and `-t/--to` (pandoc's exact
+  vocabulary — tublub is pandoc for tables). `--in-format` and `--format` are
+  removed, not kept as aliases: one canonical long name per flag.
+- Give `--sheet` the short `-s` (same frequency logic; `-s` is unused).
+- Append the dynamic format list to `--help`'s epilog; `--list-formats`
+  remains for scripting.
+
+**Why.** Short flags should go to daily operations, and `-l` meaning "list
+what's inside the file I gave you" matches `unzip -l` / `tar -t` / `7z l`
+precedent, whereas `-l` for "list supported formats" has none. The transition
+fails loud, never silent: bare `tublub -l` now errors "requires an input
+file" (it used to print formats), `--list` hits the ambiguity error,
+`-l FILE` was already an error under the old scheme, and
+`--in-format`/`--format` become unrecognized-argument errors (neither is a
+prefix of any remaining option) — so no previously working invocation
+silently changes meaning. The short flags `-f`/`-t`, the daily-use
+spellings, are untouched. Breaking; CHANGELOG entries land with the
+implementation. (Recorded with the 2026-07-04 TODO respec.)
+
+---
+
+### 019. User-facing text never names Tablib internals
+*2026-07-04 · Accepted*
+
+**Context.** Tablib's internal type names leaked into user-facing strings:
+the 0.5.0 save error said "does not support multi-sheet (Databook) output",
+the `-o` help text and a `parser.error` said "Databook", and the README and
+the respec'd TODO quoted "Databook" in message specs and in the three rules
+destined for the README.
+
+**Decision.** User-facing strings — errors, warnings, hints, `--help` text,
+README prose — use plain vocabulary: "sheet(s)", "multi-sheet",
+"sheet structure". They never name Tablib's internal types (`Dataset`,
+`Databook`). The internal names stay where they belong: code, docstrings,
+dev docs (`design.md`, this log, `TODO.md` internals).
+
+**Why.** tublub's users convert files; Tablib is an implementation detail
+they should never need to know about. "Multi-sheet" says exactly what
+"Databook" means without requiring a trip to Tablib's docs. Applied
+retroactively to the shipped 0.5.0 message and help text (CHANGELOG
+`[Unreleased]`).
