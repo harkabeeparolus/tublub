@@ -14,6 +14,7 @@ Always run `just lint` after every complete file edit. See `Justfile` for all re
 just lint       # ruff check --fix + ruff format
 just typecheck  # mypy + ty
 just test       # pytest
+just audit      # zizmor audit of .github/ (offline mode)
 just check      # all of the above
 just run ARGS  # run the CLI from the dev checkout, e.g. `just run --list`
 ```
@@ -44,6 +45,20 @@ Always update `CHANGELOG.md` under the `[Unreleased]` section when making user-f
 - User-facing strings (errors, warnings, hints, `--help`, README) never name
   Tablib internals like `Dataset`/`Databook` — say "sheet(s)"/"multi-sheet"
   (decision 019). Internal names are fine in code, docstrings, and dev docs.
+
+## GitHub Actions & Dependabot
+
+- Every action in `.github/workflows/` is pinned to a commit SHA with a
+  `# vX.Y.Z` comment (zizmor's blanket policy). To add one, resolve the SHA
+  with `git ls-remote https://github.com/OWNER/REPO 'refs/tags/vX*'` — for
+  annotated tags use the peeled `^{}` commit. Checkout steps set
+  `persist-credentials: false`.
+- Anything under `.github/` must pass `just audit` — zizmor checks
+  `dependabot.yml` too (e.g. requires `cooldown` on update entries).
+- Local zizmor runs offline; `zizmor.yml` CI runs the online audits and
+  uploads SARIF to code scanning, so CI can find things local runs don't.
+- Dependabot bumps action SHAs + version comments and `uv.lock` (grouped,
+  monthly, 7-day cooldown) — don't hand-bump pins, merge its PRs instead.
 
 ## Ruff gotchas
 
