@@ -25,7 +25,12 @@ Homepage = "https://github.com/harkabeeparolus/tublub"
 tublub = "tublub.main:cli"
 
 [dependency-groups]
-dev = ["mypy>=1", "pytest>=6", "ty>=0.0.1a0"]
+dev = [
+    "mypy>=1",
+    "pytest>=6",
+    "ty>=0.0.1a0",
+    "zizmor>=1.29",
+]
 
 [build-system]
 requires = ["uv_build>=0.10.0,<0.12.0"]

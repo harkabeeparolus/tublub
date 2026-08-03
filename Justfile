@@ -20,5 +20,9 @@ typecheck:
 test *ARGS:
     uv run pytest {{ ARGS }}
 
-# Run all checks (lint, typecheck, test)
-check: lint typecheck test
+# Audit GitHub Actions workflows (zizmor)
+audit:
+    uv run zizmor .
+
+# Run all checks (lint, typecheck, test, audit)
+check: lint typecheck test audit
