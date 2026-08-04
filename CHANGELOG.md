@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 * `--all-sheets`: select every sheet of a multi-sheet input; on an input
   without sheet structure it changes nothing. Example:
   `tublub --all-sheets -o out.json book.xlsx`
+* `-l/--list-sheets`, `-s/--sheet`, and `--all-sheets` now work on piped
+  input, both as an explicit `-` and implicitly when stdin is not a terminal.
+  Piped data is read exactly like a file argument, so
+  `cat book.xlsx | tublub -s Users -` behaves like
+  `tublub -s Users book.xlsx`. Combining several inputs still rejects `-`.
 * Combining several inputs into one workbook now expands *every* sheet of
   every input, keeping the original sheet names:
   `tublub -o merged.xlsx book.xlsx sales.csv` gives one sheet per sheet of

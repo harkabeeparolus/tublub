@@ -82,10 +82,10 @@ def cli(
 ) -> int:
     """Run the command line interface (argv defaults to sys.argv).
 
-    stderr_isatty and stdin substitute the two IO edges the default
-    single-input path touches, so tests can exercise both cases without
-    patching global state; they resolve to the real sys objects deep in
-    the call chain, so nothing probes them unless it needs them.
+    stderr_isatty and stdin substitute the two IO edges the single-input
+    paths touch, so tests can exercise both cases without patching global
+    state; they resolve to the real sys objects deep in the call chain, so
+    nothing probes them unless it needs them.
     """
     args, extra_args = parse_command_line(argv)
 
@@ -93,9 +93,9 @@ def cli(
         print("Available formats:", " ".join(get_formats()))
         return 0
     if args.list_sheets:
-        return _run_list_sheets(args, extra_args)
+        return _run_list_sheets(args, extra_args, stdin=stdin)
     if args.sheets is not None or args.all_sheets:
-        return _run_sheets(args, extra_args)
+        return _run_sheets(args, extra_args, stdin=stdin)
     if len(args.infiles) >= _MIN_DATABOOK_INPUTS:
         return _run_databook(args, extra_args)
     return _run_single(args, extra_args, stderr_isatty=stderr_isatty, stdin=stdin)
@@ -108,24 +108,32 @@ def _run_single(
     stderr_isatty: bool | None = None,
     stdin: IO[bytes] | None = None,
 ) -> int:
-    """Load one input (file or stdin) with no selection flags and render it.
-
-    Both sources go through the same try-Databook-then-Dataset handshake,
-    so piping a workbook in reads it exactly as a path argument would.
-    """
-    source = "stdin" if args.stdin else str(args.infiles[0])
+    """Load one input (file or stdin) with no selection flags and render it."""
     try:
-        if args.stdin:
-            loaded = try_load_stdin(args.in_format, extra_args, stdin=stdin)
-        else:
-            loaded = try_load_file(
-                args.infiles[0], extra_args=extra_args, in_format=args.in_format
-            )
+        loaded, source = _load_input(args, extra_args, stdin)
         _render_default(loaded, args, extra_args, source, stderr_isatty=stderr_isatty)
     except TublubError as exc:
         sys.exit(str(exc))
 
     return 0
+
+
+def _load_input(
+    args: argparse.Namespace,
+    extra_args: dict[str, Any],
+    stdin: IO[bytes] | None,
+) -> tuple[tablib.Databook | tablib.Dataset, str]:
+    """Load the one input — file or stdin — and name it for error messages.
+
+    Both sources go through the same try-Databook-then-Dataset handshake, so
+    piping a workbook in reads it exactly as a path argument would, whichever
+    selection flag asked for it.
+    """
+    if args.stdin:
+        return try_load_stdin(args.in_format, extra_args, stdin=stdin), "stdin"
+    path: Path = args.infiles[0]
+    loaded = try_load_file(path, extra_args=extra_args, in_format=args.in_format)
+    return loaded, str(path)
 
 
 def _render_default(
@@ -245,11 +253,15 @@ def _format_dataset_as_table(data: tablib.Dataset, extra_args: dict[str, Any]) -
     return str(data)
 
 
-def _run_list_sheets(args: argparse.Namespace, extra_args: dict[str, Any]) -> int:
-    """Print one line per sheet in the input file (title, rows, cols)."""
-    path: Path = args.infiles[0]
+def _run_list_sheets(
+    args: argparse.Namespace,
+    extra_args: dict[str, Any],
+    *,
+    stdin: IO[bytes] | None = None,
+) -> int:
+    """Print one line per sheet in the input (title, rows, cols)."""
     try:
-        loaded = try_load_file(path, extra_args=extra_args, in_format=args.in_format)
+        loaded, _ = _load_input(args, extra_args, stdin)
     except TublubError as exc:
         sys.exit(str(exc))
     if isinstance(loaded, tablib.Databook):
@@ -263,12 +275,16 @@ def _run_list_sheets(args: argparse.Namespace, extra_args: dict[str, Any]) -> in
     return 0
 
 
-def _run_sheets(args: argparse.Namespace, extra_args: dict[str, Any]) -> int:
+def _run_sheets(
+    args: argparse.Namespace,
+    extra_args: dict[str, Any],
+    *,
+    stdin: IO[bytes] | None = None,
+) -> int:
     """Select sheets with --sheet/--all-sheets from one input and render them."""
-    path: Path = args.infiles[0]
     try:
-        loaded = try_load_file(path, extra_args=extra_args, in_format=args.in_format)
-        _render_selection(loaded, args, extra_args, source=str(path))
+        loaded, source = _load_input(args, extra_args, stdin)
+        _render_selection(loaded, args, extra_args, source=source)
     except TublubError as exc:
         sys.exit(str(exc))
     return 0
@@ -1036,9 +1052,7 @@ def _validate_list_sheets(
         parser.error("Can not combine --list-sheets with -o/--output")
     if args.out_format:
         parser.error("Can not combine --list-sheets with -t/--to")
-    if args.stdin:
-        parser.error("--list-sheets does not yet support stdin input")
-    if not args.infiles:
+    if not args.infiles and not args.stdin:
         parser.error("--list-sheets requires an input file")
     if len(args.infiles) > 1:
         parser.error("--list-sheets accepts only one input file")
@@ -1053,9 +1067,7 @@ def _validate_sheet(parser: argparse.ArgumentParser, args: argparse.Namespace) -
         parser.error(f"Can not combine {flag} with --list-formats")
     if args.list_sheets:
         parser.error(f"Can not combine {flag} with --list-sheets")
-    if args.stdin:
-        parser.error(f"{flag} does not yet support stdin input")
-    if not args.infiles:
+    if not args.infiles and not args.stdin:
         parser.error(f"{flag} requires an input file")
     if len(args.infiles) > 1:
         parser.error(f"{flag} is not supported with multiple inputs")
@@ -1156,7 +1168,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         dest="list_sheets",
         action="store_true",
         help=(
-            'list sheets in the input file and exit: "[idx] title  rows x cols" '
+            'list sheets in the input and exit: "[idx] title  rows x cols" '
             'per sheet, or one bare "rows x cols" line if the input has no sheets'
         ),
     )

@@ -1001,6 +1001,21 @@ def test_empty_workbook_prints_nothing(empty_workbook, capsys):
     assert out == ""
 
 
+def test_stdin_lists_all_sheets(multi_sheet_xlsx, capsys):
+    """Piped input lists exactly as the same file passed by name does."""
+    rc = cli(["--list-sheets", "-"], stdin=io.BytesIO(multi_sheet_xlsx.read_bytes()))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == "[0] people  2 rows x 2 cols\n[1] cities  2 rows x 2 cols\n"
+
+
+def test_stdin_csv_falls_back_to_dataset(capsys):
+    rc = cli(["--list-sheets", "-"], stdin=io.BytesIO(b"name,age\nAlice,30\n"))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == "1 rows x 2 cols\n"
+
+
 def test_unknown_format_exits(tmp_path):
     bogus = tmp_path / "mystery.xyz"
     bogus.write_bytes(b"\x00\x01\x02not-a-known-format")
@@ -1081,14 +1096,15 @@ def test_sheet_combined_with_list_formats_rejected():
         parse_command_line(["-s", "0", "--list-formats"])
 
 
-def test_stdin_explicit_rejected():
-    with pytest.raises(SystemExit):
-        parse_command_line(["-s", "0", "-"])
+def test_stdin_explicit_accepted():
+    args, _ = parse_command_line(["-s", "0", "-"])
+    assert args.stdin is True
+    assert args.infiles == []
 
 
-def test_stdin_implicit_rejected():
-    with pytest.raises(SystemExit):
-        parse_command_line(["-s", "0"], stdin_isatty=False)
+def test_stdin_implicit_accepted():
+    args, _ = parse_command_line(["-s", "0"], stdin_isatty=False)
+    assert args.stdin is True
 
 
 def test_sheet_no_input_rejected():
@@ -1291,6 +1307,23 @@ def test_repeat_flag_mixes_title_and_index(multi_sheet_json, capsys):
     assert headings == ["=== people (2 rows) ===", "=== cities (2 rows) ==="]
 
 
+def test_stdin_pick_by_title(multi_sheet_xlsx, capsys):
+    rc = cli(["-s", "cities", "-"], stdin=io.BytesIO(multi_sheet_xlsx.read_bytes()))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Stockholm" in out
+    assert "Alice" not in out
+    assert "===" not in out
+
+
+def test_stdin_multi_selection_prints_headings(multi_sheet_xlsx, capsys):
+    rc = cli(["-s", "0,1", "-"], stdin=io.BytesIO(multi_sheet_xlsx.read_bytes()))
+    out = capsys.readouterr().out
+    assert rc == 0
+    headings = [ln for ln in out.splitlines() if ln.startswith("=== ")]
+    assert headings == ["=== people (2 rows) ===", "=== cities (2 rows) ==="]
+
+
 def test_single_select_save(multi_sheet_xlsx, tmp_path):
     out_file = tmp_path / "cities.csv"
     rc = cli(["-s", "cities", "-o", str(out_file), str(multi_sheet_xlsx)])
@@ -1429,9 +1462,14 @@ def test_all_sheets_combined_with_list_formats_rejected():
         parse_command_line(["--all-sheets", "--list-formats"])
 
 
-def test_stdin_rejected():
-    with pytest.raises(SystemExit):
-        parse_command_line(["--all-sheets", "-"])
+def test_stdin_keeps_every_sheet(multi_sheet_xlsx, capsys):
+    rc = cli(
+        ["--all-sheets", "-t", "json", "-", "-f", "xlsx"],
+        stdin=io.BytesIO(multi_sheet_xlsx.read_bytes()),
+    )
+    assert rc == 0
+    book = json.loads(capsys.readouterr().out)
+    assert [sheet["title"] for sheet in book] == ["people", "cities"]
 
 
 def test_all_sheets_multiple_inputs_rejected(sample_csv, sample_json, tmp_path):
