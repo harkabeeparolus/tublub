@@ -3,7 +3,7 @@
 The durable "how it's built and why" for tublub. Read this before changing
 format detection, error handling, or the Dataset/Databook split. For the
 record of specific calls (and their dates/rationale), see
-[`decisions.md`](decisions.md). For the multi-sheet feature roadmap, see
+[`decisions.md`](decisions.md). For unscheduled work not yet started, see
 [`TODO.md`](TODO.md). This doc is living — revise it as the design
 evolves; `decisions.md` is append-only.
 
@@ -132,8 +132,8 @@ pattern. See [`decisions.md` 020](decisions.md).
 ### Single-sheet targets never auto-split
 Single-sheet output formats (csv/tsv/dbf/cli/jira/latex/sql/...) never
 silently fan a multi-sheet input out into multiple files. The user must pick
-a single sheet explicitly. (Relevant as the multi-sheet input roadmap lands;
-see `TODO.md`.)
+a single sheet explicitly. (See *Multi-sheet behaviour* below for how each
+invocation resolves.)
 
 ## Dispatch model
 
@@ -143,6 +143,30 @@ explicitly, not by re-deriving flag combinations at each call site. A new mode
 adds one branch in `cli()` plus a `_run_*`; mutual-exclusion rules live in
 `_validate_args` (extract a per-flag `_validate_*` helper, as `_validate_list_sheets`
 already does, rather than growing one function past the C901 cap).
+
+## Multi-sheet behaviour
+
+How each invocation resolves. README documents the user-facing rules; this
+table is the complete matrix, error cases included.
+
+| Invocation | Result |
+|---|---|
+| `tublub book.xlsx` (terminal) | Print first sheet; stderr advice about the rest, gated on TTY |
+| `tublub book.xlsx out.ods` | Convert **all** sheets — default conversion goes whole-book when the target can hold it ([021](decisions.md)) |
+| `tublub book.xlsx out.csv` | Fallback: convert first sheet; **always** warn "converting only the first of N sheets" |
+| `tublub -l book.xlsx` | `[idx] title  N rows x M cols` per sheet, exit 0 |
+| `tublub -l people.csv` | One bare `N rows x M cols` line — no index/title, nothing to select |
+| `tublub -s Users book.xlsx` | Load only `Users`; behaves like a single Dataset (print / `-o` / `-t`) |
+| `tublub -s 0,2 book.xlsx` | Print sheets 0 and 2 with heading separators |
+| `tublub -s 0,2 -o out.xlsx book.xlsx` | Save those two sheets as a Databook subset |
+| `tublub -s 0 one-sheet.xlsx` | Works — a one-sheet workbook still has sheet structure ([017](decisions.md)) |
+| `tublub -s Users people.csv` | Error: input has no sheet structure |
+| `tublub -s 2024 budget.xlsx` | Index 2024; out-of-range error suggests `name:2024` if that title exists |
+| `tublub --all-sheets book.xlsx` | Print every sheet with heading separators |
+| `tublub --all-sheets -o out.xlsx book.xlsx` | Save full Databook (multi-sheet -> multi-sheet) |
+| `tublub --all-sheets -o out.csv book.xlsx` | Error: format does not support multi-sheet output; pick one sheet with `--sheet` |
+| `tublub -o out.xlsx book.xlsx users.csv` | Expand every sheet of every input into `out.xlsx` |
+| `cat book.xlsx \| tublub -l -` | Piped input reads like a file argument — every flag above accepts `-` (or implicit stdin) |
 
 ## Future directions
 

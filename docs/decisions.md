@@ -346,7 +346,7 @@ affordance. `sheet.title` truthiness distinguishes the two single-sheet origins
 loaded type or consulting a format table. Always-index keeps token resolution
 predictable; a numeric *title* is a vanishing edge not worth the typo-masking
 cost of an index-then-title fallback. This reverses the TODO 3 draft and changes
-`--list-sheets` output shipped in 0.5.0. (Commit: pending the TODO 3 changeset.)
+`--list-sheets` output shipped in 0.5.0. (Commit `a8c44c1`.)
 
 ---
 
@@ -475,7 +475,7 @@ dev docs (`design.md`, this log, `TODO.md` internals).
 they should never need to know about. "Multi-sheet" says exactly what
 "Databook" means without requiring a trip to Tablib's docs. Applied
 retroactively to the shipped 0.5.0 message and help text (CHANGELOG
-`[Unreleased]`).
+`[0.6.0]`).
 
 ---
 
@@ -607,7 +607,7 @@ alike: TODO 5's advice-vs-data-loss split (021) branches on "is this a
 conversion or a terminal print", and `--list-sheets` validation rejects a
 combined `-t`, which a phantom default would trip. The user-visible result
 is the same either way, so we take the version that keeps the explicitness
-signal. Breaking only in appearance; CHANGELOG `[Unreleased]`.
+signal. Breaking only in appearance; CHANGELOG `[0.6.0]`.
 
 ---
 

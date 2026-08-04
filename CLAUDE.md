@@ -29,20 +29,20 @@ sprinkling conditionals through the loaders.
 For the design rationale (detection policy, Dataset-vs-Databook split, the
 "no static capability matrix" principle, error boundary) read `docs/design.md`
 and the decision log in `docs/decisions.md` *before* changing format detection,
-error handling, or the load/save split. `docs/TODO.md` is the multi-sheet
-feature roadmap.
+error handling, or the load/save split. `docs/TODO.md` holds unscheduled work
+that has not been started.
 
 ## Changelog & decision log
 
 Always update `CHANGELOG.md` under the `[Unreleased]` section when making user-facing changes (new features, bug fixes, behavior changes). Follow the [Keep a Changelog](https://keepachangelog.com) format with `Added`, `Changed`, `Fixed`, `Removed` subsections.
 
-When a `docs/TODO.md` roadmap item ships, mark its heading `— DONE` and collapse the body to a short "Shipped (unreleased): ..." summary (see TODO 1 for the pattern).
+When a `docs/TODO.md` roadmap item ships, mark its heading `— DONE` and collapse the body to a short "Shipped (unreleased): ..." summary. Once the whole roadmap has shipped and been released, drop the summaries — `CHANGELOG.md` and `docs/decisions.md` already record what landed and why — and keep only the notes that neither of those holds.
 
 Record design decisions as a new numbered entry in `docs/decisions.md`: `### NNN. Title`, `*YYYY-MM-DD · Accepted*`, then **Context** / **Decision** / **Why**. Supersede earlier entries explicitly rather than rewriting them.
 
 A plan or implementation review may find a `docs/TODO.md` task's spec wrong; record the revision as a new decision entry that supersedes the task wording (021 → TODO 5, 024 → TODO 6) and have the `— DONE` summary cite it, rather than quietly rewriting the task.
 
-Not every departure needs a decision entry: a roadmap sub-task that turns out unnecessary or already shipped is just a note in the `— DONE` summary (TODO 8's fixtures, TODO 9's declined flag table). Reserve entries for real spec revisions.
+Not every departure needs a decision entry: a roadmap sub-task that turns out unnecessary or already shipped is just a note in the `— DONE` summary (the multi-sheet roadmap's dropped fixtures task and declined flag table, both still noted in `docs/TODO.md`). Reserve entries for real spec revisions.
 
 ## Conventions
 

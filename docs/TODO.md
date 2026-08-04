@@ -1,298 +1,92 @@
-# TODO — multi-sheet input support
+# TODO — unscheduled work
 
-> See [`design.md`](design.md) for the architecture and principles this
-> roadmap builds on, and [`decisions.md`](decisions.md) for the decision log.
-> Decisions **016–018** define the CLI surface below; 017 supersedes 016's
-> single-sheet rejection rule and list format. Respec'd 2026-07-04 after a
-> design review; item numbers changed (old TODOs 3/4/5 merged into today's
-> TODO 4 — decision 016's "TODO 3" refers to the old numbering).
-> Decision **021** (2026-08-04, TODO 4 plan review) respec'd TODO 5: default
-> conversion goes whole-book when the target can hold it.
+Ideas that are not scheduled and not commitments. See [`design.md`](design.md)
+for the architecture they build on and [`decisions.md`](decisions.md) for the
+decision log. Each item below needs its own decision entry when it lands.
 
-A staged plan for extending tublub so a single input file with multiple
-sheets (XLSX/ODS/XLS/JSON/YAML) can be inspected, displayed, and converted.
+Multi-sheet input support shipped 2026-08-05 — see `CHANGELOG.md` `[0.6.0]`
+for what landed and [`decisions.md`](decisions.md) 016-024 for why. Two
+sub-tasks from that roadmap were dropped rather than shipped, noted here
+because nothing else records them:
 
-**All scheduled items (1-9) are DONE as of 2026-08-04** — multi-sheet inputs
-are listed, selected, converted whole-book, expanded across inputs, and read
-from pipes. What is left lives under [Future (not scheduled)](#future-not-scheduled);
-the per-item summaries below stay as the record of what shipped.
-
-Already shipped before this roadmap: multi-input Databook *output*
-(`-o out.xlsx in1 in2 ...`), the `try_load_*` helpers (old TODO 1), and a
-first `--list-sheets` (0.5.0, output shape revised by TODO 3 below).
-
-## The surface in three rules
-
-1. **`--sheet` picks sheets; selection never changes where output may go.**
-   One selected sheet behaves exactly like a single-sheet input does today;
-   several behave like a multi-sheet workbook — printed with headings, saved
-   with `-o`, exported with `-t` — wherever the output format can hold
-   multiple sheets. `--all-sheets` is sugar for "select everything".
-2. **You can select exactly what `--list-sheets` shows.** Indexed lines
-   (`[0] Users ...`) are selectable by index or title; a bare line means the
-   input has no sheet structure and nothing to select.
-3. **Commas are for index lists; repeat `--sheet` for names; `name:` forces
-   a title.**
-
-## Don't hard-code a Tablib capability matrix
-
-The guiding principle and its rationale live in
-[`design.md` § No static Tablib capability matrix](design.md#no-static-tablib-capability-matrix)
-and [`decisions.md` 002/008](decisions.md). Discover capability by attempting
-the Databook operation and catching failure, never by a static table. The
-shipped `load_databook_file()` / `try_load_file()` implement this on the load
-side; `save_databook_file()` / `book.export()` attempts implement it on the
-save side.
-
-## Behaviour summary
-
-| Invocation | Result |
-|---|---|
-| `tublub book.xlsx` (terminal) | Print first sheet; stderr advice about the rest, gated on TTY |
-| `tublub book.xlsx out.ods` | Convert **all** sheets — default conversion goes whole-book when the target can hold it (021) |
-| `tublub book.xlsx out.csv` | Fallback: convert first sheet; **always** warn "converting only the first of N sheets" |
-| `tublub -l book.xlsx` | `[idx] title  N rows x M cols` per sheet, exit 0 |
-| `tublub -l people.csv` | One bare `N rows x M cols` line — no index/title, nothing to select |
-| `tublub -s Users book.xlsx` | Load only `Users`; behaves like a single Dataset (print / `-o` / `-t`) |
-| `tublub -s 0,2 book.xlsx` | Print sheets 0 and 2 with heading separators |
-| `tublub -s 0,2 -o out.xlsx book.xlsx` | Save those two sheets as a Databook subset |
-| `tublub -s 0 one-sheet.xlsx` | Works — a one-sheet workbook still has sheet structure (017) |
-| `tublub -s Users people.csv` | Error: input has no sheet structure |
-| `tublub -s 2024 budget.xlsx` | Index 2024; out-of-range error suggests `name:2024` if that title exists |
-| `tublub --all-sheets book.xlsx` | Print every sheet with heading separators |
-| `tublub --all-sheets -o out.xlsx book.xlsx` | Save full Databook (multi-sheet → multi-sheet) |
-| `tublub --all-sheets -o out.csv book.xlsx` | Error: format does not support multi-sheet output; pick one sheet with `--sheet` |
-| `tublub -o out.xlsx book.xlsx users.csv` | Expand every sheet of every input into `out.xlsx` |
-| `cat book.xlsx \| tublub -l -` | Piped input reads like a file argument — every flag above accepts `-` (or implicit stdin) |
-| `tublub --list-formats` | List available formats (was `-l/--list`) |
-
-Single-sheet target formats (csv/tsv/dbf/cli/jira/latex/sql) **never**
-auto-split into multiple files. We always require the user to pick a single
-sheet.
-
-## Critical files
-
-- `src/tublub/main.py` — all CLI / load / save logic.
-- `tests/test_main.py` — extend.
-- `tests/conftest.py` — add multi-sheet fixtures (TODO 8).
-- `CHANGELOG.md`, `README.md` — user-facing docs (TODO 9).
-
-## Reusable existing pieces
-
-- `try_load_file()` / `try_load_stdin()` — shipped; the "try Databook, fall
-  back to Dataset" handshake. All new modes load through these.
-- `FormatConfig` / `FORMATS` — keep as-is; still no `databook: bool` (008).
-- `filter_args()` — no change needed.
-- `save_databook_file()` — the one multi-sheet save path; reuse everywhere.
-- `export_databook()` / `_render_databook()` — shipped with TODO 4; the
-  multi-sheet export/save/print path TODO 5 reuses for whole-book defaults.
-- `_unique_titles()` — takes `(preferred, qualified)` title pairs; keeps the
-  preferred title unless it clashes (widened by TODO 6, decision 024).
-- `TublubError` boundary — keep the pattern.
+- **Dedicated test fixtures.** They landed incrementally alongside each
+  feature, so `tests/conftest.py` already carried every fixture the roadmap's
+  fixtures task listed by the time that task came up.
+- **A flag table in `README.md`.** Declined — README has never had one and
+  `--help` is the single source of truth for the flag surface, so adding one
+  would have introduced a second list to keep in sync.
 
 ---
 
-## TODO 1 — Try-load helper for Databook input — DONE
+## Don't clobber an existing output file silently
 
-Shipped in 0.5.0: `load_databook_file`/`load_databook_stdin` and the
-`try_load_file`/`try_load_stdin` handshake. See `design.md` § Dataset vs
-Databook.
+Every write path overwrites without asking, and the two-positional
+`[INFILE [OUTFILE]]` form makes that easy to trigger by accident: a
+`tublub -s 0 a.xlsx b.csv` meant as "two inputs" silently rewrites `b.csv`
+(multi-input mode needs `-o`). Precedent for guarding it is `ffmpeg`, the
+closest analogue — prompts by default, `-y`/`-n` to decide up front.
+Sketch: `-n/--no-clobber` (refuse, non-zero exit) and `-y/--yes` (always
+overwrite), mutually exclusive via `parser.error` like the other combo
+rejections; both short flags are free. Default when neither is given:
+prompt, question on **stderr** (stdout may be the data stream), gated on
+`sys.stdin.isatty()`. That gate is self-enforcing — piped data means stdin
+is not a terminal, so "reading data from stdin" and "able to ask a
+question" are mutually exclusive by construction, and scripts never block.
+The check belongs in the CLI layer, not in `save_dataset_file` /
+`save_databook_file`: those stay reusable outside the CLI, and a library
+helper must never block on stdin. Per 020 the two new IO edges
+(`stdin_isatty`, and the answer read) need injection params, not
+monkeypatched `sys` globals — `parse_command_line` already takes
+`stdin_isatty`.
 
----
+**Worth knowing before prioritising:** the prompt half only protects
+humans. An agent harness is not a terminal (`sys.stdin.isatty()` is False
+under Claude Code's Bash tool), so the default prompt would *not* have
+caught the accidental overwrite described above — that was an agent. The
+flags are the half that works everywhere, so ship `-n` first if only one
+lands. Open question for whoever ships it: does `-n` on an existing file
+exit 0 (nothing to do) or non-zero (refused)? GNU `cp -n` exits 0; a
+converter arguably should fail loud.
 
-## TODO 2 — Flag surface renames (decision 018) — DONE
+## `try_load_*` should resolve the input format once
 
-Shipped (unreleased): `-l` moved to `--list-sheets`, `--list` became the
-long-only `--list-formats`, the long format flags are now `-f/--from` and
-`-t/--to` (old spellings fail loud), and `--help` lists the formats in its
-epilog. `-s` stays reserved for `--sheet` (TODO 4).
+`try_load_file()` calls `load_databook_file()` then `load_dataset_file()`,
+and each calls `_resolve_input_format()`, which re-reads the file to detect
+and prints the "Extension suggests X but content detected as Y" warning
+unconditionally. So a CSV named `data.xls` (decision 004's own example)
+prints that warning **twice** and is read four times. Pre-existing, but the
+0.6.0 whole-book default moved it from the rare `-l`/`-s` paths onto the
+common default path. Both clean fixes change *when* the warning fires —
+short-circuit `_resolve_input_format` when `-f` is given, or have
+`try_load_*` read and detect once and pass the bytes down — so this needs
+its own decision entry. No test currently asserts the double warning; don't
+add one.
 
----
+## Title a single-input sheet after its input file
 
-## TODO 3 — `--list-sheets` reports observed structure (decision 017) — DONE
+`tublub customers.csv out.xlsx` writes a sheet named `Tablib Dataset` —
+Tablib's fallback when `Dataset.title` is `None`, which the single-input
+path never sets. Only `build_databook()` assigns titles, so
+`-o out.xlsx a.csv b.csv` names the sheets `a`/`b` while
+`-o out.xlsx a.csv` names the one sheet `Tablib Dataset`: dropping the
+second input changes how the *first* is named, the same arity surprise
+021/024 outlawed for how inputs are *read*. Sketch: in the single-input
+save/export path, title the sheet `path.stem` (through `_fit_title` for
+the 31-char cap) **only when the input had no sheet structure** — an
+observed sheet title must survive verbatim per 024, which it does today
+(a one-sheet workbook already round-trips its real title). Visible only
+in formats that carry sheet names (xlsx/ods/xls); records-shaped
+json/yaml and the single-sheet text formats are unaffected, so it is not
+a breaking output change for them. Open question for whoever ships it:
+stdin has no stem — keep Tablib's fallback, or name it `stdin`?
 
-Shipped (unreleased): inputs with sheet structure print
-`[idx] title  N rows x M cols` per sheet (any size, including 1); fallback
-Datasets print one bare `N rows x M cols` line — no index, nothing to
-select. Empty workbook prints nothing, exit 0. Output shape documented in
-`--help`.
-
----
-
-## TODO 4 — `-s/--sheet` and `--all-sheets`: selection + rendering (decision 017) — DONE
-
-Shipped (unreleased): `-s/--sheet` (0-based index / title / comma-int lists /
-repeated occurrences / `name:` escape) and `--all-sheets`, resolved against
-observed structure with dedup and selection-order preservation. One selected
-sheet renders exactly like a single-sheet input; several render as a
-multi-sheet subset through terminal print (`=== title (N rows) ===`
-headings), `-o` save, and `-t` export via the attempt-and-catch pattern.
-`--all-sheets` on a structureless input is the identity modifier. Extracted
-`_render_dataset` / `_format_dataset_as_table` / `export_databook`
-(hint-parametrized so the multi-input path never advises the `--sheet` it
-rejects); `--tablefmt` now also styles the default stdout table.
-
----
-
-## TODO 5 — Default mode: whole-book conversion + advice (decision 021) — DONE
-
-Shipped (unreleased): default single-input mode loads once through
-`try_load_file` / `try_load_stdin`, so a 2+-sheet input converts whole-book
-through `save_databook_file` / `export_databook` with no `--sheet` hint, and
-falls back to `sheets()[0]` plus an unconditional stderr data-loss warning
-naming `-s` only, on the dedicated `MultiSheetUnsupportedError` — an
-undetectable target format, an IO error, or a binary-to-terminal refusal
-still propagates. Terminal print shows the first sheet plus a stderr advice
-line gated on an injectable `stderr_isatty` threaded from `cli()` (020).
-One-sheet workbooks and structureless inputs are unchanged and silent; an
-empty workbook keeps the source-naming "No data was loaded from ..." message
-(012). Extracted `_render_default` / `_convert_whole_book`. Stdin came along
-early, leaving TODO 7 the per-flag rejections only; a size-1 JSON/YAML
-*workbook* now renders its sheet instead of a bogus `title`/`data` table.
-See decision 023.
-
----
-
-## TODO 6 — Multi-input expansion — DONE
-
-Shipped (unreleased): `build_databook()` loads each input through
-`try_load_file()` and expands every sheet of every input into the output
-book. Sheet titles are **kept verbatim** and only clashes are qualified —
-a sheet by its workbook stem (`book__Users`), a whole-file sheet by its
-parent directory (`hr_people`) — then 015's 31-char clamp and `_2`/`_3`
-suffixes as before; `_unique_titles()` now takes `(preferred, qualified)`
-pairs. This revises the task's original unconditional `stem__title`
-scheme, which would have let a second input rename the first input's
-sheets; see decision 023 (021's uniformity rule) and **024**. The
-`--sheet`/`--all-sheets` rejection for 2+ inputs shipped with TODO 4 and is
-now tested (the multi-input sheet expansion tests). An input contributing no
-sheets
-(empty workbook) makes `_run_databook`'s size-0 exit reachable.
-
----
-
-## TODO 7 — Stdin support for multi-sheet inputs — DONE
-
-Shipped (unreleased): the per-flag stdin rejections are gone, so
-`--list-sheets`, `--sheet`, and `--all-sheets` read piped input through
-`try_load_stdin()` with semantics identical to a file argument, explicit `-`
-and implicit both. The two `not args.infiles` guards gained `and not
-args.stdin` because `parse_command_line` rewrites `[-]` to
-`infiles=[], stdin=True`. Extracted `_load_input()` — the shared
-"file or stdin, plus the source name for messages" branch that `_run_single`,
-`_run_list_sheets`, and `_run_sheets` now all call, rather than triplicating
-it. Multi-input mode still forbids `-`.
-
----
-
-## TODO 8 — Tests and fixtures — DONE
-
-Shipped (unreleased): the fixtures landed incrementally with TODOs 3-6 rather
-than as one batch, so `tests/conftest.py` already carries every fixture this
-task listed (`multi_sheet_xlsx`, `multi_sheet_json`, `one_sheet_xlsx`,
-`dup_title_json`, `empty_workbook`) plus `case_dup_json`, `year_title_json`,
-and `empty_title_json`. Each feature's tests sit under its matching
-`# --- section ---` comment in `tests/test_main.py`.
-
----
-
-## TODO 9 — Docs — DONE
-
-Shipped (unreleased): `CHANGELOG.md` carries an entry per item, `README.md`
-gained a "Multi-sheet input" section quoting the three rules with worked
-examples (and its stale `--list` / `--format` examples are fixed), and
-`--help` has the formats epilog plus a short example per new flag.
-The task also asked to "update the flag table" — README has never had one and
-`--help` is the single source of truth for the flag surface, so none was
-added rather than introducing a second list to keep in sync.
-
----
-
-## Future (not scheduled)
+## Smaller multi-sheet extensions
 
 - `book.xlsx::Sheet1` per-input selection — the `::` separator stays
   reserved for this (and is why `__` was chosen for expansion titles).
-  Unlocks selection in multi-input mode (TODO 6).
+  Unlocks selection in multi-input mode.
 - Index ranges (`--sheet 0-4`) — fits the integers-only comma rule.
 - `--exclude-sheet NAME` — "everything but the Notes sheet".
 - `--list-sheets -t json` machine-readable listing — would lift the
   `--list-sheets`/`-t` mutual exclusion; don't foreclose it, don't build it
   yet.
-- **Title a single-input sheet after its input file.**
-  `tublub customers.csv out.xlsx` writes a sheet named `Tablib Dataset` —
-  Tablib's fallback when `Dataset.title` is `None`, which the single-input
-  path never sets. Only `build_databook()` assigns titles, so
-  `-o out.xlsx a.csv b.csv` names the sheets `a`/`b` while
-  `-o out.xlsx a.csv` names the one sheet `Tablib Dataset`: dropping the
-  second input changes how the *first* is named, the same arity surprise
-  021/024 outlawed for how inputs are *read*. Sketch: in the single-input
-  save/export path, title the sheet `path.stem` (through `_fit_title` for
-  the 31-char cap) **only when the input had no sheet structure** — an
-  observed sheet title must survive verbatim per 024, which it does today
-  (a one-sheet workbook already round-trips its real title). Visible only
-  in formats that carry sheet names (xlsx/ods/xls); records-shaped
-  json/yaml and the single-sheet text formats are unaffected, so it is not
-  a breaking output change for them. Open question for whoever ships it:
-  stdin has no stem — keep Tablib's fallback, or name it `stdin`? Needs a
-  decision entry when it lands.
-- **Don't clobber an existing output file silently.** *(Not multi-sheet — the
-  first non-roadmap item here; split this doc if more accumulate.)* Every
-  write path overwrites without asking, and the two-positional
-  `[INFILE [OUTFILE]]` form makes that easy to trigger by accident: a
-  `tublub -s 0 a.xlsx b.csv` meant as "two inputs" silently rewrites `b.csv`
-  (multi-input mode needs `-o`). Precedent for guarding it is `ffmpeg`, the
-  closest analogue — prompts by default, `-y`/`-n` to decide up front.
-  Sketch: `-n/--no-clobber` (refuse, non-zero exit) and `-y/--yes` (always
-  overwrite), mutually exclusive via `parser.error` like the other combo
-  rejections; both short flags are free. Default when neither is given:
-  prompt, question on **stderr** (stdout may be the data stream), gated on
-  `sys.stdin.isatty()`. That gate is self-enforcing — piped data means stdin
-  is not a terminal, so "reading data from stdin" and "able to ask a
-  question" are mutually exclusive by construction, and scripts never block.
-  The check belongs in the CLI layer, not in `save_dataset_file` /
-  `save_databook_file`: those stay reusable outside the CLI, and a library
-  helper must never block on stdin. Per 020 the two new IO edges
-  (`stdin_isatty`, and the answer read) need injection params, not
-  monkeypatched `sys` globals — `parse_command_line` already takes
-  `stdin_isatty`.
-  **Worth knowing before prioritising:** the prompt half only protects
-  humans. An agent harness is not a terminal (`sys.stdin.isatty()` is False
-  under Claude Code's Bash tool), so the default prompt would *not* have
-  caught the accidental overwrite described above — that was an agent. The
-  flags are the half that works everywhere, so ship `-n` first if only one
-  lands. Open question for whoever ships it: does `-n` on an existing file
-  exit 0 (nothing to do) or non-zero (refused)? GNU `cp -n` exits 0; a
-  converter arguably should fail loud. Needs a decision entry when it lands.
-- **`try_load_*` should resolve the input format once.** `try_load_file()`
-  calls `load_databook_file()` then `load_dataset_file()`, and each calls
-  `_resolve_input_format()`, which re-reads the file to detect and prints
-  the "Extension suggests X but content detected as Y" warning
-  unconditionally. So a CSV named `data.xls` (decision 004's own example)
-  prints that warning **twice** and is read four times. Pre-existing, but
-  TODO 5 moved it from the rare `-l`/`-s` paths onto the common default
-  path. Both clean fixes change *when* the warning fires — short-circuit
-  `_resolve_input_format` when `-f` is given, or have `try_load_*` read and
-  detect once and pass the bytes down — so this needs its own decision
-  entry. No test currently asserts the double warning; don't add one.
-
-## Open questions
-
-None right now — resolved questions are recorded in
-[`decisions.md`](decisions.md) (016-021).
-
-## Verification when each TODO ships
-
-- `just check` (ruff + mypy/ty + pytest) must pass.
-- Manual smoke against a real multi-sheet workbook:
-  - `tublub --list-formats` and `tublub --help` (epilog)
-  - `tublub -l sample.xlsx`; `tublub -l people.csv` (bare line)
-  - `tublub -s 0 sample.xlsx`, `tublub -s Users sample.xlsx`
-  - `tublub -s 0,2 sample.xlsx` (prints two sheets with headings)
-  - `tublub -s 0,2 -o out.xlsx sample.xlsx` (subset round-trip)
-  - `tublub -s 2024 budget.xlsx` vs `tublub -s name:2024 budget.xlsx`
-  - `tublub --all-sheets sample.xlsx`; `--all-sheets -o out.xlsx`;
-    `--all-sheets -o out.csv` (must error, message names `--sheet`)
-  - `tublub -o merged.xlsx sample.xlsx extra.csv` (expansion)
-  - Data-loss warning: `tublub sample.xlsx -t csv >/dev/null` (warning on
-    stderr even when redirected); advice line needs a real TTY.
-  - `cat sample.xlsx | tublub -l -` (after TODO 7)
