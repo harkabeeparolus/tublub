@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 * `--all-sheets`: select every sheet of a multi-sheet input; on an input
   without sheet structure it changes nothing. Example:
   `tublub --all-sheets -o out.json book.xlsx`
+* Combining several inputs into one workbook now expands *every* sheet of
+  every input, keeping the original sheet names:
+  `tublub -o merged.xlsx book.xlsx sales.csv` gives one sheet per sheet of
+  `book.xlsx` plus a `sales` sheet. Previously a multi-sheet input
+  contributed only its first sheet, and a JSON/YAML workbook contributed a
+  garbled two-column `title`/`data` sheet. Names are only changed when two
+  sheets would collide: a sheet then takes its workbook's filename
+  (`book__Users`), a whole-file sheet its parent directory (`hr_people`),
+  with a `_2`/`_3` suffix if that still collides and truncation to 31
+  characters for XLSX. Any renaming is reported on stderr.
 
 ### Changed
 

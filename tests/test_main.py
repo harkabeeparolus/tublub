@@ -463,67 +463,62 @@ class TestParseCommandLineStdin:
 
 
 class TestUniqueTitles:
-    def test_distinct_stems(self):
-        paths = [Path("a.csv"), Path("b.json"), Path("c.tsv")]
-        assert _unique_titles(paths) == ["a", "b", "c"]
+    def test_distinct_titles(self):
+        entries = [("a", "d_a"), ("b", "d_b"), ("c", "d_c")]
+        assert _unique_titles(entries) == ["a", "b", "c"]
 
-    def test_collision_uses_parent(self, capsys):
-        paths = [Path("d1/sales.csv"), Path("d2/sales.csv")]
-        assert _unique_titles(paths) == ["d1_sales", "d2_sales"]
+    def test_collision_uses_qualified(self, capsys):
+        entries = [("sales", "d1_sales"), ("sales", "d2_sales")]
+        assert _unique_titles(entries) == ["d1_sales", "d2_sales"]
         assert "disambiguated" in capsys.readouterr().err
 
-    def test_triple_collision_uses_parent(self):
-        paths = [Path("a/x.csv"), Path("b/x.csv"), Path("c/x.csv")]
-        assert _unique_titles(paths) == ["a_x", "b_x", "c_x"]
+    def test_triple_collision_uses_qualified(self):
+        entries = [("x", "a_x"), ("x", "b_x"), ("x", "c_x")]
+        assert _unique_titles(entries) == ["a_x", "b_x", "c_x"]
 
     def test_mixed_collisions(self):
-        paths = [
-            Path("a/sales.csv"),
-            Path("users.json"),
-            Path("b/sales.csv"),
-            Path("c/sales.csv"),
+        # Clashes are counted per preferred title: "users" keeps its own name
+        # even though the other three entries fall back to qualified forms.
+        entries = [
+            ("sales", "a_sales"),
+            ("users", "d_users"),
+            ("sales", "b_sales"),
+            ("sales", "c_sales"),
         ]
-        assert _unique_titles(paths) == [
-            "a_sales",
-            "users",
-            "b_sales",
-            "c_sales",
-        ]
+        assert _unique_titles(entries) == ["a_sales", "users", "b_sales", "c_sales"]
 
-    def test_parent_collision_falls_back_to_numeric_suffix(self):
-        # Two inputs share both parent name AND stem → parent_stem still
-        # collides, so the _2 suffix kicks in.
-        paths = [Path("proj_a/data/x.csv"), Path("proj_b/data/x.csv")]
-        assert _unique_titles(paths) == ["data_x", "data_x_2"]
+    def test_qualified_collision_falls_back_to_numeric_suffix(self):
+        # Both entries qualify to the same name (same parent dir name, or
+        # two same-titled sheets in one workbook) → the _2 suffix kicks in.
+        entries = [("x", "data_x"), ("x", "data_x")]
+        assert _unique_titles(entries) == ["data_x", "data_x_2"]
 
-    def test_bare_filename_falls_back_to_numeric_suffix(self, capsys):
-        # No parent name available for "Sales.csv" → numeric suffix.
-        paths = [Path("Sales.csv"), Path("dir/Sales.csv")]
-        assert _unique_titles(paths) == ["Sales", "dir_Sales"]
+    def test_unqualifiable_entry_falls_back_to_numeric_suffix(self, capsys):
+        # A path with no parent name qualifies to its own stem.
+        entries = [("Sales", "Sales"), ("Sales", "dir_Sales")]
+        assert _unique_titles(entries) == ["Sales", "dir_Sales"]
         assert "disambiguated" in capsys.readouterr().err
 
     def test_no_collision_no_note(self, capsys):
-        paths = [Path("a.csv"), Path("b.csv")]
-        _unique_titles(paths)
+        _unique_titles([("a", "d_a"), ("b", "d_b")])
         assert capsys.readouterr().err == ""
 
     def test_empty(self):
         assert _unique_titles([]) == []
 
-    def test_long_stem_truncated_to_limit(self, capsys):
-        stem = "a" * 40
-        titles = _unique_titles([Path(f"{stem}.csv")])
+    def test_long_title_truncated_to_limit(self, capsys):
+        long = "a" * 40
+        titles = _unique_titles([(long, long)])
         assert titles == ["a" * 31]
-        assert all(len(t) <= 31 for t in titles)
         assert "disambiguated" in capsys.readouterr().err
 
     def test_long_shared_prefix_stays_unique(self):
-        # Two distinct stems sharing a >31-char prefix clamp to the same 31
+        # Two distinct titles sharing a >31-char prefix clamp to the same 31
         # chars, so the _2 suffix kicks in with the base trimmed to fit.
         prefix = "x" * 40
-        titles = _unique_titles([Path(f"{prefix}A.csv"), Path(f"{prefix}B.csv")])
+        entries = [(f"{prefix}A", f"{prefix}A"), (f"{prefix}B", f"{prefix}B")]
+        titles = _unique_titles(entries)
         assert all(len(t) <= 31 for t in titles)
-        assert len(set(titles)) == 2
         assert titles == ["x" * 31, "x" * 29 + "_2"]
 
 
@@ -783,6 +778,98 @@ class TestCliDatabook:
         out = tmp_path / "book.csv"
         with pytest.raises(SystemExit):
             cli(["-o", str(out), str(sample_csv), str(sample_csv)])
+
+
+# --- multi-input sheet expansion ---
+
+
+def _titles(*paths):
+    return [s.title for s in build_databook(list(paths), extra_args={}).sheets()]
+
+
+class TestMultiInputExpansion:
+    def test_book_sheets_expand_alongside_dataset(self, multi_sheet_xlsx, sample_csv):
+        assert _titles(multi_sheet_xlsx, sample_csv) == ["people", "cities", "data"]
+
+    def test_no_note_when_titles_survive(self, multi_sheet_xlsx, sample_csv, capsys):
+        _titles(multi_sheet_xlsx, sample_csv)
+        assert capsys.readouterr().err == ""
+
+    def test_one_sheet_book_keeps_its_title(self, one_sheet_xlsx, sample_csv):
+        assert _titles(one_sheet_xlsx, sample_csv) == ["people", "data"]
+
+    def test_clash_across_inputs_qualifies_by_stem(self, multi_sheet_xlsx, capsys):
+        assert _titles(multi_sheet_xlsx, multi_sheet_xlsx) == [
+            "book__people",
+            "book__cities",
+            "book__people_2",
+            "book__cities_2",
+        ]
+        assert "disambiguated" in capsys.readouterr().err
+
+    def test_clash_within_one_input(self, dup_title_json):
+        assert _titles(dup_title_json) == ["dup__Users", "Costs", "dup__Users_2"]
+
+    def test_dataset_title_clashing_with_sheet_title(self, multi_sheet_xlsx, tmp_path):
+        # A file stem clashing with a sheet title qualifies by parent
+        # directory, the sheet by its workbook stem.
+        subdir = tmp_path / "hr"
+        subdir.mkdir()
+        people = subdir / "people.csv"
+        people.write_text("name,age\nCarol,41\n")
+        assert _titles(multi_sheet_xlsx, people) == [
+            "book__people",
+            "cities",
+            "hr_people",
+        ]
+
+    def test_long_clashing_titles_clamped(self, tmp_path):
+        rows = [{"a": 1}]
+        title = "T" * 25
+        path = tmp_path / f"{'s' * 20}.json"
+        path.write_text(
+            json.dumps([{"title": title, "data": rows}, {"title": title, "data": rows}])
+        )
+        titles = _titles(path)
+        assert all(len(t) <= 31 for t in titles)
+        assert len(set(titles)) == 2
+
+    def test_untitled_sheet_expands(self, empty_title_json):
+        assert _titles(empty_title_json) == ["", "named"]
+
+    def test_empty_workbook_contributes_nothing(self, empty_workbook, sample_csv):
+        assert _titles(empty_workbook, sample_csv) == ["data"]
+
+    def test_all_inputs_empty_exits(self, empty_workbook, tmp_path):
+        second = tmp_path / "other.json"
+        second.write_text("[]")
+        out = tmp_path / "out.xlsx"
+        with pytest.raises(SystemExit):
+            cli(["-o", str(out), str(empty_workbook), str(second)])
+
+    def test_cli_round_trip(self, multi_sheet_xlsx, sample_csv, tmp_path):
+        out = tmp_path / "merged.xlsx"
+        assert cli(["-o", str(out), str(multi_sheet_xlsx), str(sample_csv)]) == 0
+        loaded = tablib.Databook().load(out.read_bytes(), format="xlsx")
+        assert [s.title for s in loaded.sheets()] == ["people", "cities", "data"]
+
+    def test_sheet_flag_rejected_with_two_inputs(self, multi_sheet_xlsx, sample_csv):
+        with pytest.raises(SystemExit):
+            parse_command_line(
+                ["-o", "out.xlsx", "-s", "0", str(multi_sheet_xlsx), str(sample_csv)]
+            )
+
+    def test_all_sheets_rejected_with_two_inputs(self, multi_sheet_xlsx, sample_csv):
+        with pytest.raises(SystemExit):
+            parse_command_line(
+                [
+                    "-o",
+                    "out.xlsx",
+                    "--all-sheets",
+                    str(multi_sheet_xlsx),
+                    str(sample_csv),
+                ]
+            )
 
 
 # --- --list-sheets ---

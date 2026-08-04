@@ -40,8 +40,10 @@ Saved 'book.xlsx', 3 sheets (xlsx)
 ```
 
 With `-o`, all positional arguments are inputs. Two or more inputs become
-sheets in a single multi-sheet file (XLSX, ODS, JSON, YAML, ...); sheet names
-default to each input file's stem.
+sheets in a single multi-sheet file (XLSX, ODS, JSON, YAML, ...) — every sheet
+of every input, so multi-sheet inputs are expanded rather than truncated.
+Sheets keep their own names, and a whole-file input is named after its file
+stem; names are only changed when two would collide.
 
 To inspect a multi-sheet input without converting it, use `--list-sheets`:
 
@@ -51,8 +53,8 @@ $ tublub --list-sheets book.xlsx
 [1] cities  2 rows x 2 cols
 ```
 
-Single-sheet formats (CSV, TSV, ...) print one row, using the file stem
-as the title.
+An input without sheet structure (CSV, TSV, records-shaped JSON, ...) prints
+one bare `N rows x M cols` line — there is no index or title to select.
 
 ## News and Changes
 

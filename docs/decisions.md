@@ -649,3 +649,56 @@ keeps one rule — "did the user name an output format or file?" — rather than
 a special case for the one format that happens to look like the default
 view. Refines 021 and 012; supersedes nothing. (Recorded at the TODO 5 plan
 review.)
+
+---
+
+### 024. Multi-input expansion keeps original sheet titles; only clashes are qualified
+*2026-08-04 · Accepted*
+
+**Context.** TODO 6's task text specified that in multi-input mode every
+sheet of a multi-sheet input be retitled `f"{path.stem}__{sheet.title}"`
+unconditionally, with `_unique_titles` widened so 015's clamp-and-suffix
+machinery applied on top. Implementing it exposed the cost: every other
+shipped multi-sheet path — `_convert_whole_book` (021), `--all-sheets` and
+`-s` subsets (017) — writes sheet titles through verbatim, so
+`tublub -o out.xlsx book.xlsx` preserved `Users` while
+`tublub -o out.xlsx book.xlsx extra.csv` renamed it to `book__Users`. Adding
+an unrelated second input would rename the first input's sheets.
+
+**Decision.**
+- **Expansion keeps titles verbatim; qualification is clash-only.** Each
+  contributed sheet carries a `(preferred, qualified)` pair. A preferred
+  title that occurs once is used as-is; one that occurs two or more times
+  (exact match) falls back to its qualified form. Both clash parties
+  qualify — the winner is not decided by input order.
+- **The qualified form names the sheet's container:** a workbook sheet takes
+  its file stem (`book__Users`), a whole-file sheet takes its parent
+  directory (`hr_people`, the shipped 015 rule). A path with no parent name
+  qualifies to its own stem, which then falls to the numeric suffix.
+- **015's tail is unchanged and applies to whichever form was chosen:**
+  right-truncate the whole string to 31 characters, then `_2`/`_3` on
+  residual collisions with the base trimmed to fit. No budget split between
+  the stem and sheet-title halves of `stem__title`.
+- **`_unique_titles` takes `list[tuple[str, str]]`**, not paths — the caller
+  derives both forms, since only it knows whether a sheet came from a
+  workbook or a whole file. The stderr note stays inside it, comparing final
+  against preferred: under clash-only qualification every difference is
+  genuine disambiguation, so no separate "naive title" bookkeeping is
+  needed.
+- **Untitled sheets are not special-cased.** An empty title is a preferred
+  title like any other: unique on its own, qualified to `stem__` on clash.
+
+**Why.** 021's rule — "adding or removing a second input must not change how
+the first is read" — extends to how it is *named*; a scheme where sheet names
+depend on argv length is the same surprise in a different costume.
+Preservation is also what the format's own tools do: merging workbooks in a
+spreadsheet application keeps sheet names and only disambiguates duplicates.
+Accepted cost, and the reason unconditional prefixing was tempting: output
+names now depend on cross-input contents, so introducing a new clash can
+rename a previously stable sheet — but that is exactly the case where a
+stable name is impossible anyway, and the note announces it. Rejected the
+"scripts want a predictable `stem__title`" argument: a script that needs
+fixed sheet names is better served by one `-s` invocation per sheet than by
+tublub renaming everything on the chance of a collision. Supersedes TODO 6's
+title-derivation wording; 015's clamp-and-suffix rules and the note stand
+unchanged. (Recorded at the TODO 6 plan review.)

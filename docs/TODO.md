@@ -83,7 +83,8 @@ sheet.
 - `save_databook_file()` — the one multi-sheet save path; reuse everywhere.
 - `export_databook()` / `_render_databook()` — shipped with TODO 4; the
   multi-sheet export/save/print path TODO 5 reuses for whole-book defaults.
-- `_unique_titles()` — widen to accept pre-derived titles (TODO 6).
+- `_unique_titles()` — takes `(preferred, qualified)` title pairs; keeps the
+  preferred title unless it clashes (widened by TODO 6, decision 024).
 - `TublubError` boundary — keep the pattern.
 
 ---
@@ -149,27 +150,20 @@ See decision 023.
 
 ---
 
-## TODO 6 — Multi-input expansion
+## TODO 6 — Multi-input expansion — DONE
 
-**Goal:** In multi-input mode (`-o` + 2 or more inputs), expand every sheet
-of every input into the output Databook.
-
-**Tasks**
-- In `build_databook()`, use `try_load_file()` per input: a Databook
-  contributes all its sheets titled `f"{path.stem}__{sheet.title}"`; a
-  Dataset contributes one sheet titled `path.stem`, as today.
-- Generalise `_unique_titles()` to accept pre-derived titles so the
-  015 clamp-and-suffix machinery applies uniformly (`stem__title` easily
-  exceeds 31 chars).
-- **`--sheet`/`--all-sheets` with 2+ inputs: `parser.error` "not supported
-  with multiple inputs"** (017). Expansion takes everything; per-input
-  selection is deferred to the reserved `book.xlsx::Sheet1` syntax (see
-  Future). This replaces the old "apply --sheet uniformly / ignore on
-  non-capable inputs" idea, which contradicted single-input strictness.
-
-**Tests** — `tublub -o out.xlsx book.xlsx users.csv` yields book.xlsx's
-sheets plus one for users.csv; title collision gets `_2`; long `stem__title`
-clamped to 31 chars; `-s`/`--all-sheets` with 2+ inputs rejected.
+Shipped (unreleased): `build_databook()` loads each input through
+`try_load_file()` and expands every sheet of every input into the output
+book. Sheet titles are **kept verbatim** and only clashes are qualified —
+a sheet by its workbook stem (`book__Users`), a whole-file sheet by its
+parent directory (`hr_people`) — then 015's 31-char clamp and `_2`/`_3`
+suffixes as before; `_unique_titles()` now takes `(preferred, qualified)`
+pairs. This revises the task's original unconditional `stem__title`
+scheme, which would have let a second input rename the first input's
+sheets; see decision 023 (021's uniformity rule) and **024**. The
+`--sheet`/`--all-sheets` rejection for 2+ inputs shipped with TODO 4 and is
+now tested (`TestMultiInputExpansion`). An input contributing no sheets
+(empty workbook) makes `_run_databook`'s size-0 exit reachable.
 
 ---
 

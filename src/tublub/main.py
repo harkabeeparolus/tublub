@@ -685,13 +685,33 @@ def build_databook(
     extra_args: dict[str, Any],
     in_format: str | None = None,
 ) -> tablib.Databook:
-    """Build a Databook from multiple input files, one sheet per file."""
-    titles = _unique_titles(paths)
+    """Build a Databook from multiple input files, expanding every sheet.
+
+    An input with sheet structure contributes all its sheets under their
+    own titles; any other input contributes one sheet titled by its file
+    stem. Titles are kept verbatim; only clashing titles fall back to a
+    qualified form — a sheet by its workbook's stem (book__Users), a stem
+    by its parent directory (data_a) — see _unique_titles.
+    """
+    sheets: list[tablib.Dataset] = []
+    entries: list[tuple[str, str]] = []
+    for path in paths:
+        loaded = try_load_file(path, extra_args=extra_args, in_format=in_format)
+        if isinstance(loaded, tablib.Databook):
+            for sheet in loaded.sheets():
+                title = sheet.title or ""
+                sheets.append(sheet)
+                entries.append((title, f"{path.stem}__{title}"))
+        else:
+            qualified = path.stem
+            if path.parent.name:
+                qualified = f"{path.parent.name}_{path.stem}"
+            sheets.append(loaded)
+            entries.append((path.stem, qualified))
     book = tablib.Databook()
-    for path, title in zip(paths, titles, strict=True):
-        ds = load_dataset_file(path, extra_args=extra_args, in_format=in_format)
-        ds.title = title
-        book.add_sheet(ds)
+    for sheet, title in zip(sheets, _unique_titles(entries), strict=True):
+        sheet.title = title
+        book.add_sheet(sheet)
     return book
 
 
@@ -756,30 +776,28 @@ def _fit_title(base: str, suffix: str = "") -> str:
     return base[: XLSX_TITLE_LIMIT - len(suffix)] + suffix
 
 
-def _unique_titles(paths: list[Path]) -> list[str]:
-    """Return sheet titles from path stems; disambiguate stem collisions.
+def _unique_titles(entries: list[tuple[str, str]]) -> list[str]:
+    """Resolve (preferred, qualified) title pairs into unique sheet titles.
 
-    On stem collision (data/a.csv + backup/a.csv) the parent directory
-    qualifies the title (data_a, backup_a). Underscore is used because
-    XLSX sheet titles forbid the characters slash, backslash, question
-    mark, asterisk, and brackets. Titles are clamped to XLSX_TITLE_LIMIT
-    (XLSX caps worksheet titles at 31 characters). If the parent-qualified
-    or clamped title also collides (same parent name twice in the input
-    list, a path with no parent name, or two long stems sharing a 31-char
-    prefix), a _2/_3 numeric suffix kicks in on top, with the base trimmed
-    so the suffix still fits. A stderr note is emitted whenever any
-    disambiguation happens so users notice that the workbook's sheet names
-    don't match the input stems verbatim.
+    A preferred title that occurs once is kept verbatim; one that clashes
+    with another entry's preferred title falls back to its qualified form,
+    which the caller derives from the sheet's container (a workbook stem
+    for a sheet, a parent directory for a file stem). Underscore joins are
+    used because XLSX sheet titles forbid the characters slash, backslash,
+    question mark, asterisk, and brackets. Titles are clamped to
+    XLSX_TITLE_LIMIT (XLSX caps worksheet titles at 31 characters). If the
+    qualified or clamped title also collides (two sheets of the same name
+    in one workbook, a path with no parent name, or two long titles
+    sharing a 31-char prefix), a _2/_3 numeric suffix kicks in on top,
+    with the base trimmed so the suffix still fits. A stderr note is
+    emitted whenever any title had to change so users notice that the
+    workbook's sheet names don't match the inputs verbatim.
     """
-    stem_counts = Counter(p.stem for p in paths)
+    preferred_counts = Counter(preferred for preferred, _ in entries)
     titles: list[str] = []
     used: set[str] = set()
-    for path in paths:
-        stem = path.stem
-        if stem_counts[stem] > 1 and path.parent.name:
-            base = _fit_title(f"{path.parent.name}_{stem}")
-        else:
-            base = _fit_title(stem)
+    for preferred, qualified in entries:
+        base = _fit_title(qualified if preferred_counts[preferred] > 1 else preferred)
         candidate = base
         n = 1
         while candidate in used:
@@ -787,9 +805,9 @@ def _unique_titles(paths: list[Path]) -> list[str]:
             candidate = _fit_title(base, f"_{n}")
         used.add(candidate)
         titles.append(candidate)
-    if any(t != p.stem for t, p in zip(titles, paths, strict=True)):
+    if any(t != preferred for t, (preferred, _) in zip(titles, entries, strict=True)):
         print(
-            "Note: sheet titles disambiguated (filename collisions or 31-char limit)",
+            "Note: sheet titles disambiguated (name collisions or 31-char limit)",
             file=sys.stderr,
         )
     return titles
