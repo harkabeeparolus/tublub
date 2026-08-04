@@ -746,13 +746,32 @@ class TestListSheets:
         assert lines[0] == "[0] people  2 rows x 2 cols"
         assert lines[1] == "[1] cities  2 rows x 2 cols"
 
+    def test_one_sheet_xlsx_keeps_index(self, one_sheet_xlsx, capsys):
+        """A one-sheet workbook still has sheet structure, so [0] is shown."""
+        rc = cli(["--list-sheets", str(one_sheet_xlsx)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert out == "[0] people  2 rows x 2 cols\n"
+
     def test_csv_falls_back_to_dataset(self, sample_csv, capsys):
+        """No sheet structure: one bare line, no index or title."""
         rc = cli(["--list-sheets", str(sample_csv)])
         out = capsys.readouterr().out
         assert rc == 0
-        lines = out.strip().splitlines()
-        assert len(lines) == 1
-        assert lines[0] == f"[0] {sample_csv.stem}  2 rows x 3 cols"
+        assert out == "2 rows x 3 cols\n"
+
+    def test_records_json_falls_back_to_dataset(self, sample_json, capsys):
+        """Records-shaped JSON has no sheet structure: one bare line."""
+        rc = cli(["--list-sheets", str(sample_json)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert out == "2 rows x 3 cols\n"
+
+    def test_empty_workbook_prints_nothing(self, empty_workbook, capsys):
+        rc = cli(["--list-sheets", str(empty_workbook)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert out == ""
 
     def test_unknown_format_exits(self, tmp_path):
         bogus = tmp_path / "mystery.xyz"

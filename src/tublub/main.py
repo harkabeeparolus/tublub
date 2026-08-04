@@ -118,8 +118,9 @@ def _run_list_sheets(args: argparse.Namespace, extra_args: dict[str, Any]) -> in
             ncols = len(sheet.headers or [])
             print(f"[{idx}] {sheet.title}  {len(sheet)} rows x {ncols} cols")
     else:
+        # No sheet structure: one bare line, no [idx]/title — nothing to select.
         ncols = len(loaded.headers or [])
-        print(f"[0] {path.stem}  {len(loaded)} rows x {ncols} cols")
+        print(f"{len(loaded)} rows x {ncols} cols")
     return 0
 
 
@@ -753,7 +754,10 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--list-sheets",
         dest="list_sheets",
         action="store_true",
-        help="list sheets in the input file (title, rows, cols) and exit",
+        help=(
+            'list sheets in the input file and exit: "[idx] title  rows x cols" '
+            'per sheet, or one bare "rows x cols" line if the input has no sheets'
+        ),
     )
 
     output_group = parser.add_argument_group(title="output options")

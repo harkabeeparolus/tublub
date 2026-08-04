@@ -92,58 +92,22 @@ Databook.
 
 ---
 
-## TODO 2 — Flag surface renames (decision 018)
+## TODO 2 — Flag surface renames (decision 018) — DONE
 
-**Goal:** Reassign the short flags to the daily operations before the new
-modes land, as one coherent breaking release.
-
-**Tasks**
-- `--list` → `--list-formats`, long-only. Rename dest `list` →
-  `list_formats`; it is referenced in `cli()`, `_validate_args`,
-  `_validate_list_sheets`, and `_should_use_implicit_stdin`.
-- Move `-l` to `--list-sheets`. Keep **no** `--list` alias: argparse's
-  default prefix matching makes bare `--list` error "ambiguous option:
-  could match --list-formats, --list-sheets" — that *is* the migration
-  message, so don't set `allow_abbrev=False`.
-- Replace the long forms: `-f/--from` and `-t/--to` (pandoc vocabulary);
-  drop `--in-format` and `--format` entirely — both fail loud as
-  unrecognized arguments, and the short flags are untouched. Keep the
-  explicit `dest="in_format"`/`dest="out_format"` (`from` is a Python
-  keyword, so argparse must not derive the dest from the flag name).
-- Add `-s` to `--sheet` when TODO 4 creates it (recorded here so the short
-  flag stays reserved).
-- Append the dynamic format list to the parser epilog
-  (`epilog=f"available formats: {' '.join(get_formats())}"`), so `--help`
-  answers the discovery question; `--list-formats` remains for scripting.
-- `CHANGELOG.md`: Changed entries marked **breaking**.
-
-**Tests** — `parse_command_line` cases for each rename; `--from`/`--to` set
-`in_format`/`out_format`; dropped spellings (`--list`, `--in-format`,
-`--format`) are rejected; bare `tublub -l` errors "requires an input file";
-`--list-formats` rejects filenames (existing `--list` test, renamed).
+Shipped (unreleased): `-l` moved to `--list-sheets`, `--list` became the
+long-only `--list-formats`, the long format flags are now `-f/--from` and
+`-t/--to` (old spellings fail loud), and `--help` lists the formats in its
+epilog. `-s` stays reserved for `--sheet` (TODO 4).
 
 ---
 
-## TODO 3 — `--list-sheets` reports observed structure (decision 017)
+## TODO 3 — `--list-sheets` reports observed structure (decision 017) — DONE
 
-**Goal:** Make `--list-sheets` output exactly mirror what `--sheet` accepts.
-
-**Tasks**
-- `try_load_file()` returned a **Databook** (any size, including 1): print
-  `f"[{idx}] {sheet.title}  {len(sheet)} rows x {ncols} cols"` per sheet.
-  The size-1 index is a true affordance under 017 — `--sheet 0` works.
-- Returned a fallback **Dataset** (CSV / records-shaped JSON): print one
-  bare `f"{len(ds)} rows x {ncols} cols"` line — no index, no title. The
-  missing `[idx]` visually teaches that there is nothing to select. This
-  replaces both the 0.5.0 `[0] {stem}` line and 016's title-only form.
-- Empty workbook: print nothing, exit 0 (unchanged).
-- No `_sheets_of()` normaliser needed: both this and TODO 4 branch on
-  Databook-ness directly, which is the 017 rule itself.
-- Document the output shape in `--help`.
-
-**Tests** — multi-sheet xlsx (indexed lines), one-sheet xlsx (`[0] Title`),
-csv (bare line), records-shaped json (bare line), empty workbook, existing
-mutual-exclusion tests unchanged.
+Shipped (unreleased): inputs with sheet structure print
+`[idx] title  N rows x M cols` per sheet (any size, including 1); fallback
+Datasets print one bare `N rows x M cols` line — no index, nothing to
+select. Empty workbook prints nothing, exit 0. Output shape documented in
+`--help`.
 
 ---
 

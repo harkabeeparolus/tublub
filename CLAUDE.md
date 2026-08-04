@@ -36,6 +36,8 @@ feature roadmap.
 
 Always update `CHANGELOG.md` under the `[Unreleased]` section when making user-facing changes (new features, bug fixes, behavior changes). Follow the [Keep a Changelog](https://keepachangelog.com) format with `Added`, `Changed`, `Fixed`, `Removed` subsections.
 
+When a `docs/TODO.md` roadmap item ships, mark its heading `— DONE` and collapse the body to a short "Shipped (unreleased): ..." summary (see TODO 1 for the pattern).
+
 ## Conventions
 
 - Print statements are allowed (`T20` ignored in Ruff config) since this is a CLI tool.

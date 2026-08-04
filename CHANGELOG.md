@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   `-f/--from` and `-t/--to`. The old long forms `--in-format` and `--format`
   are removed and now error as unrecognized arguments; the short flags `-f`
   and `-t` are unchanged.
+* **Breaking:** `-l/--list-sheets` on an input without sheet structure (e.g.
+  CSV, or JSON shaped as a list of records) now prints one bare
+  `N rows x M cols` line instead of a made-up `[0] {filename}` entry. An
+  indexed line now always means a real, selectable sheet.
 * `--help` now lists the available formats in its epilog, so format discovery
   no longer requires `--list-formats`.
 * Error messages and `--help` text no longer mention Tablib's internal

@@ -55,6 +55,28 @@ def sample_yaml(tmp_path):
 
 
 @pytest.fixture
+def one_sheet_xlsx(tmp_path):
+    """Write a one-sheet XLSX workbook and return its path."""
+    book = tablib.Databook()
+    people = tablib.Dataset(headers=["name", "age"])
+    people.append(["Alice", 30])
+    people.append(["Bob", 25])
+    people.title = "people"
+    book.add_sheet(people)
+    p = tmp_path / "single.xlsx"
+    p.write_bytes(book.export("xlsx"))
+    return p
+
+
+@pytest.fixture
+def empty_workbook(tmp_path):
+    """Write a JSON workbook with zero sheets and return its path."""
+    p = tmp_path / "empty.json"
+    p.write_text(tablib.Databook().export("json"))
+    return p
+
+
+@pytest.fixture
 def multi_sheet_xlsx(tmp_path):
     """Write a two-sheet XLSX file and return its path."""
     book = tablib.Databook()
