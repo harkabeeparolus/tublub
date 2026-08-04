@@ -32,11 +32,13 @@ and the decision log in `docs/decisions.md` *before* changing format detection,
 error handling, or the load/save split. `docs/TODO.md` is the multi-sheet
 feature roadmap.
 
-## Changelog
+## Changelog & decision log
 
 Always update `CHANGELOG.md` under the `[Unreleased]` section when making user-facing changes (new features, bug fixes, behavior changes). Follow the [Keep a Changelog](https://keepachangelog.com) format with `Added`, `Changed`, `Fixed`, `Removed` subsections.
 
 When a `docs/TODO.md` roadmap item ships, mark its heading `— DONE` and collapse the body to a short "Shipped (unreleased): ..." summary (see TODO 1 for the pattern).
+
+Record design decisions as a new numbered entry in `docs/decisions.md`: `### NNN. Title`, `*YYYY-MM-DD · Accepted*`, then **Context** / **Decision** / **Why**. Supersede earlier entries explicitly rather than rewriting them.
 
 ## Conventions
 
@@ -69,6 +71,10 @@ When a `docs/TODO.md` roadmap item ships, mark its heading `— DONE` and collap
 - C901/PLR0912 cap functions at ~10 cyclomatic / ~12 branches — extract a helper before piling more guards into `_validate_args` or `cli`.
 - S101 forbids `assert` in `src/` (tests get it via per-file-ignores). For type narrowing, use an explicit `if x is None: raise TublubError(...)` instead, or extract a helper whose return type is already narrow (see `_default_export_handle`) rather than reaching for `typing.cast`.
 - D301 rejects backslashes in docstrings — spell out characters (e.g. "backslash") or prefix the docstring with `r"""`.
+- ANN401 forbids `Any` in signatures, and annotating Tablib's untyped `export()`
+  payload as `str | bytes` then trips mypy when writing it to `IO[str] | IO[bytes]`.
+  Don't return the payload — mirror `export_dataset`/`export_databook`: take an
+  optional `file_handle`, keep the payload in a local, and write it there.
 
 ## Testing patterns
 
@@ -79,4 +85,8 @@ When a `docs/TODO.md` roadmap item ships, mark its heading `— DONE` and collap
   `parse_command_line(argv, stdin_isatty=True/False)` for input-presence/implicit-stdin
   paths, `stdin=io.BytesIO(...)` for the stdin loaders, `stdout=` for
   `_default_export_handle`.
+- Decision 020's ban covers `sys` globals only — `monkeypatch.setattr("tublub.main.get_formats", ...)`
+  is fine (used to simulate a Tablib install without the `cli` format).
+- Byte-exact output checks: `diff <(uv run tublub a.csv) <(uv run tublub -t cli a.csv)`
+  for render identity; `uv run tublub -t json a.csv | xxd | tail -1` for trailing newlines.
 - Rejection tests use `pytest.raises(SystemExit)` since `parser.error()` exits.
