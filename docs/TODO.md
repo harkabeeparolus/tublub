@@ -162,7 +162,8 @@ pairs. This revises the task's original unconditional `stem__title`
 scheme, which would have let a second input rename the first input's
 sheets; see decision 023 (021's uniformity rule) and **024**. The
 `--sheet`/`--all-sheets` rejection for 2+ inputs shipped with TODO 4 and is
-now tested (`TestMultiInputExpansion`). An input contributing no sheets
+now tested (the multi-input sheet expansion tests). An input contributing no
+sheets
 (empty workbook) makes `_run_databook`'s size-0 exit reachable.
 
 ---
@@ -192,8 +193,8 @@ now tested (`TestMultiInputExpansion`). An input contributing no sheets
 - `tests/conftest.py` fixtures, built programmatically with tablib:
   `multi_sheet_xlsx`, `multi_sheet_json`, `one_sheet_xlsx`,
   `dup_title_json` (two sheets titled "Users"), `empty_workbook`.
-- Per-item test lists above; group as `TestListSheets`, `TestSheetSelect`,
-  `TestAllSheets`, `TestHints`, `TestMultiInputExpansion`.
+- Per-item test lists above; group each feature's tests under its matching
+  `# --- section ---` comment in `tests/test_main.py`.
 
 ---
 
@@ -240,18 +241,6 @@ now tested (`TestMultiInputExpansion`). An input contributing no sheets
   a breaking output change for them. Open question for whoever ships it:
   stdin has no stem — keep Tablib's fallback, or name it `stdin`? Needs a
   decision entry when it lands.
-- **Flatten the test suite to module-level functions.** The `Test*` classes
-  add an indentation level and `self` noise without using any class feature
-  (no class-scoped fixtures or marks); the pytest-native style is flat
-  functions, and the file already carries `# --- section ---` comments that
-  can serve as the group separators. Mechanics: dedent, drop `self`, and
-  **rename the ~10 leaf names duplicated across classes** (e.g.
-  `test_empty_stdin_raises`) — in a flat module a duplicate silently
-  *shadows* the earlier definition, so verify the collected count is
-  unchanged (`pytest --collect-only -q | tail -1`) before and after. Update
-  TODO 8's "group as `TestX`" wording and CLAUDE.md's testing-patterns
-  bullet in the same change; do it as a standalone mechanical commit with no
-  behavior edits mixed in.
 - **`try_load_*` should resolve the input format once.** `try_load_file()`
   calls `load_databook_file()` then `load_dataset_file()`, and each calls
   `_resolve_input_format()`, which re-reads the file to detect and prints

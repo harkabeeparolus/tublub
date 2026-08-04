@@ -105,10 +105,9 @@ A plan or implementation review may find a `docs/TODO.md` task's spec wrong; rec
 - Byte-exact output checks: `diff <(uv run tublub a.csv) <(uv run tublub -t cli a.csv)`
   for render identity; `uv run tublub -t json a.csv | xxd | tail -1` for trailing newlines.
 - Rejection tests use `pytest.raises(SystemExit)` since `parser.error()` exits.
-- Tests are grouped in `Test*` classes, not module-level `def test_` functions;
-  plain pytest classes, no `unittest.TestCase`. `docs/TODO.md` names the
-  expected class per feature. (Flattening to comment-grouped functions is a
-  Future item in `docs/TODO.md` — follow the class style until that lands.)
+- Tests are module-level `def test_` functions grouped under `# --- section ---`
+  comments (bare `# text` comments mark sub-groups within a section); no
+  `Test*` classes, no `unittest.TestCase`.
 - Smoke-testing TTY-gated output needs a real terminal:
   `script -qec "uv run tublub FILE >/dev/null" /dev/null`. The Bash tool runs
   `/bin/bash`, not the user's fish — use `<(...)`, not `psub`.
