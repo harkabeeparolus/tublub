@@ -12,12 +12,14 @@
 A staged plan for extending tublub so a single input file with multiple
 sheets (XLSX/ODS/XLS/JSON/YAML) can be inspected, displayed, and converted.
 
-Already shipped: multi-input Databook *output* (`-o out.xlsx in1 in2 ...`),
-the `try_load_*` helpers (old TODO 1), and a first `--list-sheets` (0.5.0,
-output shape revised by TODO 3 below). This document covers the rest of the
-input side, where tublub still silently loads only the first sheet.
+**All scheduled items (1-9) are DONE as of 2026-08-04** — multi-sheet inputs
+are listed, selected, converted whole-book, expanded across inputs, and read
+from pipes. What is left lives under [Future (not scheduled)](#future-not-scheduled);
+the per-item summaries below stay as the record of what shipped.
 
-Work the items in order — later ones depend on earlier helpers.
+Already shipped before this roadmap: multi-input Databook *output*
+(`-o out.xlsx in1 in2 ...`), the `try_load_*` helpers (old TODO 1), and a
+first `--list-sheets` (0.5.0, output shape revised by TODO 3 below).
 
 ## The surface in three rules
 
@@ -61,6 +63,7 @@ save side.
 | `tublub --all-sheets -o out.xlsx book.xlsx` | Save full Databook (multi-sheet → multi-sheet) |
 | `tublub --all-sheets -o out.csv book.xlsx` | Error: format does not support multi-sheet output; pick one sheet with `--sheet` |
 | `tublub -o out.xlsx book.xlsx users.csv` | Expand every sheet of every input into `out.xlsx` |
+| `cat book.xlsx \| tublub -l -` | Piped input reads like a file argument — every flag above accepts `-` (or implicit stdin) |
 | `tublub --list-formats` | List available formats (was `-l/--list`) |
 
 Single-sheet target formats (csv/tsv/dbf/cli/jira/latex/sql) **never**
@@ -168,49 +171,40 @@ sheets
 
 ---
 
-## TODO 7 — Stdin support for multi-sheet inputs
+## TODO 7 — Stdin support for multi-sheet inputs — DONE
 
-**Goal:** `--list-sheets`, `--sheet`, `--all-sheets` work on piped input.
-
-**Tasks**
-- `try_load_stdin()` already exists (reads once, tries both
-  interpretations) and default mode already routes through it (TODO 5,
-  decision 023). Lift the per-flag stdin rejections in
-  `_validate_list_sheets` / `_validate_sheet` and route those three flags
-  through it too; semantics identical to the file path. `cli()`'s injectable
-  `stdin=` edge is already in place for the tests.
-- Multi-input mode keeps forbidding `-` (unchanged).
-
-**Tests** — pipe a multi-sheet xlsx into tublub with each flag.
+Shipped (unreleased): the per-flag stdin rejections are gone, so
+`--list-sheets`, `--sheet`, and `--all-sheets` read piped input through
+`try_load_stdin()` with semantics identical to a file argument, explicit `-`
+and implicit both. The two `not args.infiles` guards gained `and not
+args.stdin` because `parse_command_line` rewrites `[-]` to
+`infiles=[], stdin=True`. Extracted `_load_input()` — the shared
+"file or stdin, plus the source name for messages" branch that `_run_single`,
+`_run_list_sheets`, and `_run_sheets` now all call, rather than triplicating
+it. Multi-input mode still forbids `-`.
 
 ---
 
-## TODO 8 — Tests and fixtures
+## TODO 8 — Tests and fixtures — DONE
 
-**Goal:** Cover all the new code paths.
-
-**Tasks**
-- `tests/conftest.py` fixtures, built programmatically with tablib:
-  `multi_sheet_xlsx`, `multi_sheet_json`, `one_sheet_xlsx`,
-  `dup_title_json` (two sheets titled "Users"), `empty_workbook`.
-- Per-item test lists above; group each feature's tests under its matching
-  `# --- section ---` comment in `tests/test_main.py`.
+Shipped (unreleased): the fixtures landed incrementally with TODOs 3-6 rather
+than as one batch, so `tests/conftest.py` already carries every fixture this
+task listed (`multi_sheet_xlsx`, `multi_sheet_json`, `one_sheet_xlsx`,
+`dup_title_json`, `empty_workbook`) plus `case_dup_json`, `year_title_json`,
+and `empty_title_json`. Each feature's tests sit under its matching
+`# --- section ---` comment in `tests/test_main.py`.
 
 ---
 
-## TODO 9 — Docs
+## TODO 9 — Docs — DONE
 
-**Goal:** User-facing documentation.
-
-**Tasks**
-- `CHANGELOG.md` as each item ships: `Added` for `-s/--sheet`,
-  `--all-sheets`, expansion, stdin; `Changed` (**breaking**) for the flag
-  renames (TODO 2), the `--list-sheets` output shape (TODO 3), and the new
-  conversion warning (TODO 5).
-- `README.md`: update the flag table, add a "Multi-sheet input" section
-  with worked examples, and quote the three rules from the top of this
-  file.
-- `--help`: short example per new flag; formats epilog (TODO 2).
+Shipped (unreleased): `CHANGELOG.md` carries an entry per item, `README.md`
+gained a "Multi-sheet input" section quoting the three rules with worked
+examples (and its stale `--list` / `--format` examples are fixed), and
+`--help` has the formats epilog plus a short example per new flag.
+The task also asked to "update the flag table" — README has never had one and
+`--help` is the single source of truth for the flag surface, so none was
+added rather than introducing a second list to keep in sync.
 
 ---
 
