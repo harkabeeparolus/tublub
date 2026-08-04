@@ -49,6 +49,34 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 * Text output written to stdout now ends with a newline, so the shell prompt no
   longer starts on the last line of output. Files written with `-o` are
   byte-for-byte unchanged.
+* **Breaking:** converting a multi-sheet input now converts *every* sheet by
+  default. `tublub book.xlsx out.ods` and `tublub -t json book.xlsx` write the
+  whole workbook instead of silently keeping only the first sheet — matching
+  what `--all-sheets` does, and what multi-input `-o` has always done, so
+  adding or dropping a second input no longer changes how the first one is
+  read. Output formats that cannot hold several sheets (CSV, TSV, DBF, `cli`,
+  ...) still get the first sheet, but now always say so on stderr, even when
+  stderr is redirected:
+  `book.xlsx: format 'csv' cannot hold all 2 sheets; converting only the first (use -s to choose)`.
+  Scripts that relied on first-sheet-only conversion, or that need an output
+  shape independent of the input's sheet count, should pin `-s 0`. Asking for
+  every sheet explicitly stays strict: `--all-sheets` and multi-sheet `-s`
+  selections still error where the default falls back.
+* Printing a multi-sheet input to the terminal still shows its first sheet, and
+  now points at the others on stderr when stderr is a terminal:
+  `book.xlsx: 1 more sheet(s) — see -l to list, -s to pick, --all-sheets for all`.
+  The note is suppressed when stderr is redirected or piped, so scripted
+  pipelines stay quiet. One-sheet inputs and inputs without sheet structure are
+  unchanged and print nothing extra.
+
+### Fixed
+
+* A one-sheet JSON or YAML *workbook* (`[{"title": ..., "data": [...]}]`) now
+  renders its sheet, instead of a two-column `title`/`data` table of the raw
+  workbook wrapper.
+* Piped input is read exactly like a file argument, so
+  `cat book.xlsx | tublub -f xlsx -o out.ods` no longer drops the sheets that
+  `tublub book.xlsx -o out.ods` keeps.
 
 ## [0.5.0] - 2026-05-29
 

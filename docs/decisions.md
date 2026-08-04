@@ -608,3 +608,44 @@ conversion or a terminal print", and `--list-sheets` validation rejects a
 combined `-t`, which a phantom default would trip. The user-visible result
 is the same either way, so we take the version that keeps the explicitness
 signal. Breaking only in appearance; CHANGELOG `[Unreleased]`.
+
+---
+
+### 023. Default mode reads stdin like a file; empty-workbook wording stays source-named
+*2026-08-04 · Accepted*
+
+**Context.** Implementing 021 raised three questions 021 did not answer.
+TODO 5's task text names only `try_load_file`, so a literal reading would
+leave the stdin branch of `_run_single` on `load_dataset_stdin` —
+`cat book.xlsx | tublub -f xlsx -o out.ods` would keep dropping sheets that
+`tublub book.xlsx -o out.ods` now preserves. Loading through `try_load_*`
+also routes a size-0 Databook (an empty JSON/YAML workbook) into the default
+path for the first time, where 017's selection message "workbook has no
+sheets" and 012's source-naming "No data was loaded from {source}" compete.
+And `Databook.export("cli")` turns out to be unsupported, so `-t cli` is a
+failing conversion rather than a view.
+
+**Decision.**
+- **Default mode loads stdin through `try_load_stdin`**, not
+  `load_dataset_stdin`. `cli()` gains an injectable `stdin` edge (020) so the
+  path is testable. TODO 7 keeps the rest of its scope: lifting the
+  `--list-sheets`/`--sheet`/`--all-sheets` stdin rejections.
+- **An empty workbook in default mode keeps "No data was loaded from
+  {source}"**; "workbook has no sheets" stays the selection path's message.
+  Extends 012's distinctness rule to the Databook-in-default-mode case.
+- **`-t cli` is a conversion, not a view.** It gets the unconditional
+  data-loss warning; only the bare terminal print gets the TTY-gated advice.
+  Stdout stays byte-identical between the two (022 holds); only stderr
+  differs.
+
+**Why.** 021's own argument — "adding or removing a second input must not
+change how the first is read" — applies unchanged to moving an input from
+argv into a pipe; an input-source-dependent data-loss rule would be the same
+surprise in a different costume. The empty-workbook wording follows 012: the
+default path names the file it read, which is the only information the user
+lacks, whereas someone who typed `--all-sheets` already knows the source and
+needs to know the *structure* is empty. Treating `-t cli` as a conversion
+keeps one rule — "did the user name an output format or file?" — rather than
+a special case for the one format that happens to look like the default
+view. Refines 021 and 012; supersedes nothing. (Recorded at the TODO 5 plan
+review.)

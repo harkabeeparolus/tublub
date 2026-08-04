@@ -130,47 +130,22 @@ rejects); `--tablefmt` now also styles the default stdout table.
 
 ---
 
-## TODO 5 — Default mode: whole-book conversion + advice (decision 021)
+## TODO 5 — Default mode: whole-book conversion + advice (decision 021) — DONE
 
-**Goal:** Default mode never drops sheets silently: conversion goes
-whole-book when the target can hold it, warn-falls-back to the first sheet
-when it can't, and terminal print makes extra sheets discoverable.
-(Respec'd 2026-08-04 at the TODO 4 plan review — decision 021 replaced the
-original always-first-sheet conversion rule, which was inconsistent with
-TODO 6's expand-everything default.)
-
-**Tasks**
-- Default single-input mode loads via `try_load_file()` once (no re-read to
-  count sheets). On a Databook with `size > 1`:
-  - **Terminal print** (no `-o`/`-t`): print `sheets()[0]`; stderr *advice*,
-    gated on `sys.stderr.isatty()` (injectable per 020):
-    `f"{file}: {size - 1} more sheet(s) — see -l to list, -s to pick, --all-sheets for all"`.
-    Advice in a pipe is noise; a TTY gate is the cheap proxy for "a human
-    is watching".
-  - **Conversion** (`-o` or `-t`): attempt the whole book through the
-    TODO 4 helpers (`save_databook_file` / `export_databook`, no hint).
-    When the target format cannot hold multiple sheets, fall back to
-    `sheets()[0]` via `_render_dataset` with a stderr *data-loss warning*,
-    **unconditional**:
-    `f"{file}: format {fmt!r} cannot hold all {size} sheets; converting only the first (use -s to choose)"`.
-    Dropping sheets is a correctness issue, not advice — scripts must see
-    it. The warning suggests `-s` only, never `--all-sheets`, which errors
-    in that same situation (explicit flags stay strict; only the default
-    falls back). The fallback must trigger only on the multi-sheet-
-    unsupported failure — likely a dedicated `TublubError` subclass raised
-    by `export_databook`, so unrelated errors (undetectable target format,
-    IO) still propagate.
-- Size-1 Databook or fallback Dataset: no message, exactly today's
-  behavior (mirrors `--all-sheets` semantics per 017/021).
-- `--sheet`/`--all-sheets`/`--list-sheets` take other dispatch paths, so
-  the messages are naturally suppressed there.
-
-**Tests** — advice present on TTY stderr and absent when piped (injectable
-isatty, no monkeypatching); whole-book default: `book.xlsx` + `-o out.json`
-/ `-t json` yields all sheets; fallback: `-o out.csv` / `-t csv` emits the
-first sheet plus the warning regardless of TTY; unrelated save errors not
-swallowed by the fallback; no message for single-sheet inputs or with
-`-s`/`--all-sheets`.
+Shipped (unreleased): default single-input mode loads once through
+`try_load_file` / `try_load_stdin`, so a 2+-sheet input converts whole-book
+through `save_databook_file` / `export_databook` with no `--sheet` hint, and
+falls back to `sheets()[0]` plus an unconditional stderr data-loss warning
+naming `-s` only, on the dedicated `MultiSheetUnsupportedError` — an
+undetectable target format, an IO error, or a binary-to-terminal refusal
+still propagates. Terminal print shows the first sheet plus a stderr advice
+line gated on an injectable `stderr_isatty` threaded from `cli()` (020).
+One-sheet workbooks and structureless inputs are unchanged and silent; an
+empty workbook keeps the source-naming "No data was loaded from ..." message
+(012). Extracted `_render_default` / `_convert_whole_book`. Stdin came along
+early, leaving TODO 7 the per-flag rejections only; a size-1 JSON/YAML
+*workbook* now renders its sheet instead of a bogus `title`/`data` table.
+See decision 023.
 
 ---
 
@@ -204,8 +179,11 @@ clamped to 31 chars; `-s`/`--all-sheets` with 2+ inputs rejected.
 
 **Tasks**
 - `try_load_stdin()` already exists (reads once, tries both
-  interpretations). Lift the per-flag stdin rejections and route through
-  it; semantics identical to the file path.
+  interpretations) and default mode already routes through it (TODO 5,
+  decision 023). Lift the per-flag stdin rejections in
+  `_validate_list_sheets` / `_validate_sheet` and route those three flags
+  through it too; semantics identical to the file path. `cli()`'s injectable
+  `stdin=` edge is already in place for the tests.
 - Multi-input mode keeps forbidding `-` (unchanged).
 
 **Tests** — pipe a multi-sheet xlsx into tublub with each flag.
@@ -251,6 +229,29 @@ clamped to 31 chars; `-s`/`--all-sheets` with 2+ inputs rejected.
 - `--list-sheets -t json` machine-readable listing — would lift the
   `--list-sheets`/`-t` mutual exclusion; don't foreclose it, don't build it
   yet.
+- **Flatten the test suite to module-level functions.** The `Test*` classes
+  add an indentation level and `self` noise without using any class feature
+  (no class-scoped fixtures or marks); the pytest-native style is flat
+  functions, and the file already carries `# --- section ---` comments that
+  can serve as the group separators. Mechanics: dedent, drop `self`, and
+  **rename the ~10 leaf names duplicated across classes** (e.g.
+  `test_empty_stdin_raises`) — in a flat module a duplicate silently
+  *shadows* the earlier definition, so verify the collected count is
+  unchanged (`pytest --collect-only -q | tail -1`) before and after. Update
+  TODO 8's "group as `TestX`" wording and CLAUDE.md's testing-patterns
+  bullet in the same change; do it as a standalone mechanical commit with no
+  behavior edits mixed in.
+- **`try_load_*` should resolve the input format once.** `try_load_file()`
+  calls `load_databook_file()` then `load_dataset_file()`, and each calls
+  `_resolve_input_format()`, which re-reads the file to detect and prints
+  the "Extension suggests X but content detected as Y" warning
+  unconditionally. So a CSV named `data.xls` (decision 004's own example)
+  prints that warning **twice** and is read four times. Pre-existing, but
+  TODO 5 moved it from the rare `-l`/`-s` paths onto the common default
+  path. Both clean fixes change *when* the warning fires — short-circuit
+  `_resolve_input_format` when `-f` is given, or have `try_load_*` read and
+  detect once and pass the bytes down — so this needs its own decision
+  entry. No test currently asserts the double warning; don't add one.
 
 ## Open questions
 

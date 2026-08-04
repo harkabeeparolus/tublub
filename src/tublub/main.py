@@ -23,6 +23,21 @@ class TublubError(ValueError):
     """Raised for tublub-specific errors (bad format, empty data, etc.)."""
 
 
+class MultiSheetUnsupportedError(TublubError):
+    """Raised when a target format cannot hold a multi-sheet workbook.
+
+    A distinct type so the default-mode fallback can catch exactly this
+    failure, while every other TublubError — undetectable target format,
+    binary-to-terminal refusal — still propagates. Carries the resolved
+    target format so the fallback names what was attempted.
+    """
+
+    def __init__(self, message: str, target_format: str) -> None:
+        """Store the message and the format that could not hold the sheets."""
+        super().__init__(message)
+        self.target_format = target_format
+
+
 @dataclass(frozen=True)
 class FormatConfig:
     """Per-format configuration for loading, saving, and opening files."""
@@ -59,8 +74,19 @@ FORMATS: dict[str, FormatConfig] = {
 _DEFAULT_FMT = FormatConfig()
 
 
-def cli(argv: list[str] | None = None) -> int:
-    """Run the command line interface (argv defaults to sys.argv)."""
+def cli(
+    argv: list[str] | None = None,
+    *,
+    stderr_isatty: bool | None = None,
+    stdin: IO[bytes] | None = None,
+) -> int:
+    """Run the command line interface (argv defaults to sys.argv).
+
+    stderr_isatty and stdin substitute the two IO edges the default
+    single-input path touches, so tests can exercise both cases without
+    patching global state; they resolve to the real sys objects deep in
+    the call chain, so nothing probes them unless it needs them.
+    """
     args, extra_args = parse_command_line(argv)
 
     if args.list_formats:
@@ -72,32 +98,116 @@ def cli(argv: list[str] | None = None) -> int:
         return _run_sheets(args, extra_args)
     if len(args.infiles) >= _MIN_DATABOOK_INPUTS:
         return _run_databook(args, extra_args)
-    return _run_single(args, extra_args)
+    return _run_single(args, extra_args, stderr_isatty=stderr_isatty, stdin=stdin)
 
 
-def _run_single(args: argparse.Namespace, extra_args: dict[str, Any]) -> int:
-    """Load one input (file or stdin) as a Dataset and render it."""
+def _run_single(
+    args: argparse.Namespace,
+    extra_args: dict[str, Any],
+    *,
+    stderr_isatty: bool | None = None,
+    stdin: IO[bytes] | None = None,
+) -> int:
+    """Load one input (file or stdin) with no selection flags and render it.
+
+    Both sources go through the same try-Databook-then-Dataset handshake,
+    so piping a workbook in reads it exactly as a path argument would.
+    """
+    source = "stdin" if args.stdin else str(args.infiles[0])
     try:
         if args.stdin:
-            my_data = load_dataset_stdin(
-                in_format=args.in_format, extra_args=extra_args
-            )
+            loaded = try_load_stdin(args.in_format, extra_args, stdin=stdin)
         else:
-            my_data = load_dataset_file(
+            loaded = try_load_file(
                 args.infiles[0], extra_args=extra_args, in_format=args.in_format
             )
-    except TublubError as exc:
-        sys.exit(str(exc))
-    if not my_data:
-        source = "stdin" if args.stdin else str(args.infiles[0])
-        sys.exit(f"No data was loaded from {source}")
-
-    try:
-        _render_dataset(my_data, args, extra_args)
+        _render_default(loaded, args, extra_args, source, stderr_isatty=stderr_isatty)
     except TublubError as exc:
         sys.exit(str(exc))
 
     return 0
+
+
+def _render_default(
+    loaded: tablib.Databook | tablib.Dataset,
+    args: argparse.Namespace,
+    extra_args: dict[str, Any],
+    source: str,
+    *,
+    stderr_isatty: bool | None = None,
+) -> None:
+    """Render an input that carries no sheet selection.
+
+    A workbook with 2+ sheets converts whole-book under -o/-t (falling back
+    to its first sheet when the target cannot hold them all) and otherwise
+    prints its first sheet plus a stderr advice line — gated on stderr
+    being a terminal, the cheap proxy for "a human is watching", since in a
+    pipe it would only be noise. A one-sheet workbook or a fallback Dataset
+    renders as a single sheet with no message, exactly as before. A
+    Databook is always truthy, so emptiness is asked of sheets() rather
+    than of the book. The real sys.stderr is probed at call time, and only
+    once there is something to advise.
+    """
+    if isinstance(loaded, tablib.Dataset):
+        if not loaded:
+            msg = f"No data was loaded from {source}"
+            raise TublubError(msg)
+        _render_dataset(loaded, args, extra_args)
+        return
+    sheets = loaded.sheets()
+    if not sheets:
+        msg = f"No data was loaded from {source}"
+        raise TublubError(msg)
+    size = len(sheets)
+    if size > 1 and (args.outfile or args.out_format):
+        _convert_whole_book(loaded, args, extra_args, source)
+        return
+    _render_dataset(sheets[0], args, extra_args)
+    if size <= 1:
+        return
+    if stderr_isatty is None:
+        stderr_isatty = sys.stderr.isatty()
+    if stderr_isatty:
+        print(
+            f"{source}: {size - 1} more sheet(s) — see -l to list, "
+            "-s to pick, --all-sheets for all",
+            file=sys.stderr,
+        )
+
+
+def _convert_whole_book(
+    book: tablib.Databook,
+    args: argparse.Namespace,
+    extra_args: dict[str, Any],
+    source: str,
+) -> None:
+    """Convert every sheet, or the first one plus a warning when that fails.
+
+    The default is best-effort: the whole-book attempt carries no --sheet
+    hint, and a target that cannot hold several sheets gets the first sheet
+    plus an unconditional stderr data-loss warning — dropping data is a
+    correctness problem scripts must see, not advice. The warning names -s
+    only, never --all-sheets, which errors in this same situation. Only
+    MultiSheetUnsupportedError falls back; an undetectable target format,
+    an IO error, or a binary-to-terminal refusal still propagates.
+    """
+    try:
+        if args.outfile:
+            save_databook_file(
+                book,
+                file_name=args.outfile,
+                force_format=args.out_format,
+                extra_args=extra_args,
+            )
+        else:
+            export_databook(book, args.out_format, extra_args)
+    except MultiSheetUnsupportedError as exc:
+        print(
+            f"{source}: format {exc.target_format!r} cannot hold all "
+            f"{book.size} sheets; converting only the first (use -s to choose)",
+            file=sys.stderr,
+        )
+        _render_dataset(book.sheets()[0], args, extra_args)
 
 
 def _render_dataset(
@@ -597,7 +707,8 @@ def save_databook_file(
 
     hint, when given, is appended to the unsupported-format error message
     (the advice differs per caller: sheet selection can suggest --sheet,
-    the multi-input path must not).
+    the multi-input path must not). A target that cannot hold the sheets
+    raises MultiSheetUnsupportedError.
     """
     file_format = _resolve_output_format(force_format, file_name)
 
@@ -621,7 +732,8 @@ def export_databook(
     Mirrors export_dataset, including its stdout newline handling.
     Multi-sheet capability is discovered by attempting the export, never
     from a static table; hint is appended to the unsupported-format error
-    message when given.
+    message when given. That failure raises MultiSheetUnsupportedError, so
+    callers can tell it apart from every other TublubError.
     """
     to_stdout = file_handle is None
     if file_handle is None:
@@ -633,7 +745,7 @@ def export_databook(
         msg = f"Format {target_format!r} does not support multi-sheet output"
         if hint:
             msg += f"; {hint}"
-        raise TublubError(msg) from exc
+        raise MultiSheetUnsupportedError(msg, target_format) from exc
     if to_stdout and isinstance(output, str) and output and output[-1] != "\n":
         output += "\n"
     file_handle.write(output)

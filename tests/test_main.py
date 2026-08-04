@@ -9,6 +9,7 @@ import tablib
 
 from tublub.main import (
     FORMATS,
+    MultiSheetUnsupportedError,
     TublubError,
     _default_export_handle,
     _looks_like_text_lines,
@@ -16,6 +17,7 @@ from tublub.main import (
     build_argument_parser,
     build_databook,
     cli,
+    export_databook,
     export_dataset,
     filter_args,
     get_formats,
@@ -29,6 +31,7 @@ from tublub.main import (
     save_databook_file,
     save_dataset_file,
     try_load_file,
+    try_load_stdin,
 )
 
 # --- guess_file_format ---
@@ -591,6 +594,39 @@ class TestSaveDatabookFile:
         assert loaded.size == 2
 
 
+# --- MultiSheetUnsupportedError ---
+
+
+class TestMultiSheetUnsupportedError:
+    def test_export_raises_subclass_carrying_the_format(self, sample_csv):
+        """The default-mode fallback needs the format that was attempted."""
+        book = build_databook([sample_csv, sample_csv], extra_args={})
+        with pytest.raises(MultiSheetUnsupportedError) as excinfo:
+            export_databook(book, "csv", {}, file_handle=io.StringIO())
+        assert issubclass(MultiSheetUnsupportedError, TublubError)
+        assert excinfo.value.target_format == "csv"
+        assert "does not support multi-sheet output" in str(excinfo.value)
+
+    def test_hint_still_appended(self, sample_csv):
+        book = build_databook([sample_csv, sample_csv], extra_args={})
+        with pytest.raises(MultiSheetUnsupportedError) as excinfo:
+            export_databook(
+                book, "csv", {}, file_handle=io.StringIO(), hint="pick one sheet"
+            )
+        assert str(excinfo.value).endswith("; pick one sheet")
+
+    def test_binary_to_tty_is_not_the_fallback_signal(self):
+        """Only the unsupported-format failure may trigger a fallback."""
+
+        class TTYStdout(io.TextIOWrapper):
+            def isatty(self):
+                return True
+
+        with pytest.raises(TublubError) as excinfo:
+            _default_export_handle("xlsx", stdout=TTYStdout(io.BytesIO()))
+        assert not isinstance(excinfo.value, MultiSheetUnsupportedError)
+
+
 # --- load_databook_file ---
 
 
@@ -671,6 +707,25 @@ class TestLoadDatabookStdin:
     def test_empty_stdin_raises(self):
         with pytest.raises(TublubError, match="No data"):
             load_databook_stdin(stdin=io.BytesIO(b""))
+
+
+# --- try_load_stdin ---
+
+
+class TestTryLoadStdin:
+    def test_multi_sheet_xlsx_returns_book(self, multi_sheet_xlsx):
+        loaded = try_load_stdin(stdin=io.BytesIO(multi_sheet_xlsx.read_bytes()))
+        assert isinstance(loaded, tablib.Databook)
+        assert loaded.size == 2
+
+    def test_csv_returns_dataset(self):
+        loaded = try_load_stdin(stdin=io.BytesIO(b"name,age\nAlice,30\n"))
+        assert isinstance(loaded, tablib.Dataset)
+        assert "Alice" in str(loaded)
+
+    def test_empty_stdin_raises(self):
+        with pytest.raises(TublubError, match="No data received"):
+            try_load_stdin(stdin=io.BytesIO(b""))
 
 
 # --- parse_command_line: multi-input mode ---
@@ -1158,6 +1213,268 @@ class TestAllSheets:
             parse_command_line(
                 ["--all-sheets", "-o", str(out), str(sample_csv), str(sample_json)]
             )
+
+
+# --- default mode on a multi-sheet input ---
+
+
+class TestDefaultMultiSheet:
+    """Default mode: whole-book conversion, first-sheet print, no silent loss."""
+
+    # --- terminal print + advice ---
+
+    def test_print_shows_first_sheet_only(self, multi_sheet_xlsx, capsys):
+        rc = cli([str(multi_sheet_xlsx)], stderr_isatty=False)
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "Alice" in out
+        assert "Stockholm" not in out
+        assert "===" not in out
+
+    def test_advice_on_tty(self, multi_sheet_xlsx, capsys):
+        cli([str(multi_sheet_xlsx)], stderr_isatty=True)
+        err = capsys.readouterr().err
+        assert f"{multi_sheet_xlsx}: 1 more sheet(s)" in err
+        assert "-l to list" in err
+        assert "-s to pick" in err
+        assert "--all-sheets for all" in err
+
+    def test_no_advice_when_piped(self, multi_sheet_xlsx, capsys):
+        """Advice is for a watching human; in a pipe it is only noise."""
+        cli([str(multi_sheet_xlsx)], stderr_isatty=False)
+        assert capsys.readouterr().err == ""
+
+    def test_advice_counts_remaining_sheets(self, multi_sheet_json, capsys):
+        cli([str(multi_sheet_json)], stderr_isatty=True)
+        assert "2 more sheet(s)" in capsys.readouterr().err
+
+    def test_stdout_identical_regardless_of_tty(self, multi_sheet_xlsx, capsys):
+        """The gate must affect stderr only."""
+        cli([str(multi_sheet_xlsx)], stderr_isatty=True)
+        on_tty = capsys.readouterr().out
+        cli([str(multi_sheet_xlsx)], stderr_isatty=False)
+        assert capsys.readouterr().out == on_tty
+
+    def test_no_advice_for_one_sheet_workbook(self, one_sheet_xlsx, capsys):
+        rc = cli([str(one_sheet_xlsx)], stderr_isatty=True)
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert "Alice" in captured.out
+        assert captured.err == ""
+
+    @pytest.mark.parametrize("fixture", ["sample_csv", "sample_json"])
+    def test_no_advice_for_structureless_input(self, fixture, request, capsys):
+        path = request.getfixturevalue(fixture)
+        rc = cli([str(path)], stderr_isatty=True)
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert "Alice" in captured.out
+        assert captured.err == ""
+
+    @pytest.mark.parametrize("flags", [["-s", "0"], ["--all-sheets"]])
+    def test_no_advice_with_selection_flags(self, flags, multi_sheet_xlsx, capsys):
+        """Selection takes another dispatch path, so the advice is suppressed."""
+        rc = cli([*flags, str(multi_sheet_xlsx)], stderr_isatty=True)
+        assert rc == 0
+        assert capsys.readouterr().err == ""
+
+    def test_no_advice_with_list_sheets(self, multi_sheet_xlsx, capsys):
+        rc = cli(["-l", str(multi_sheet_xlsx)], stderr_isatty=True)
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert "[0] people" in captured.out
+        assert captured.err == ""
+
+    # --- whole-book conversion ---
+
+    def test_save_keeps_all_sheets(self, multi_sheet_json, tmp_path, capsys):
+        out_file = tmp_path / "out.xlsx"
+        rc = cli(["-o", str(out_file), str(multi_sheet_json)], stderr_isatty=True)
+        captured = capsys.readouterr()
+        assert rc == 0
+        loaded = tablib.Databook().load(out_file.read_bytes(), format="xlsx")
+        assert loaded.size == 3
+        assert "3 sheets" in captured.out
+        assert captured.err == ""
+
+    def test_export_keeps_all_sheets(self, multi_sheet_xlsx, capsys):
+        rc = cli(["-t", "json", str(multi_sheet_xlsx)], stderr_isatty=False)
+        captured = capsys.readouterr()
+        assert rc == 0
+        book = json.loads(captured.out)
+        assert [sheet["title"] for sheet in book] == ["people", "cities"]
+        assert captured.err == ""
+
+    def test_save_json_uses_book_shape(self, multi_sheet_xlsx, tmp_path):
+        out_file = tmp_path / "out.json"
+        cli(["-o", str(out_file), str(multi_sheet_xlsx)], stderr_isatty=False)
+        book = json.loads(out_file.read_text())
+        assert [sheet["title"] for sheet in book] == ["people", "cities"]
+
+    def test_positional_outfile_keeps_all_sheets(self, multi_sheet_xlsx, tmp_path):
+        """The two-positional style is the same conversion path as -o."""
+        out_file = tmp_path / "out.xlsx"
+        rc = cli([str(multi_sheet_xlsx), str(out_file)], stderr_isatty=False)
+        assert rc == 0
+        loaded = tablib.Databook().load(out_file.read_bytes(), format="xlsx")
+        assert loaded.size == 2
+
+    # --- fallback + unconditional data-loss warning ---
+
+    @pytest.mark.parametrize("isatty", [True, False])
+    def test_export_csv_falls_back_with_warning(self, isatty, multi_sheet_xlsx, capsys):
+        """Dropping sheets is a correctness issue, so the warning is ungated."""
+        rc = cli(["-t", "csv", str(multi_sheet_xlsx)], stderr_isatty=isatty)
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert captured.out.startswith("name,age")
+        assert "Stockholm" not in captured.out
+        assert f"{multi_sheet_xlsx}: format 'csv' cannot hold all 2 sheets" in (
+            captured.err
+        )
+        assert "converting only the first" in captured.err
+        assert "use -s to choose" in captured.err
+
+    def test_fallback_never_suggests_all_sheets(self, multi_sheet_xlsx, capsys):
+        """--all-sheets errors in this same situation, so it must not be advised."""
+        cli(["-t", "csv", str(multi_sheet_xlsx)], stderr_isatty=True)
+        assert "--all-sheets" not in capsys.readouterr().err
+
+    def test_save_csv_falls_back_cleanly(self, multi_sheet_xlsx, tmp_path, capsys):
+        """The whole-book attempt truncates the target; the fallback rewrites it."""
+        out_file = tmp_path / "out.csv"
+        rc = cli(["-o", str(out_file), str(multi_sheet_xlsx)], stderr_isatty=False)
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert "cannot hold all 2 sheets" in captured.err
+        assert "2 records" in captured.out
+        text = out_file.read_text()
+        assert text.startswith("name,age")
+        assert "Stockholm" not in text
+        assert len(text.strip().splitlines()) == 3
+
+    def test_fallback_names_the_attempted_format(
+        self, multi_sheet_xlsx, tmp_path, capsys
+    ):
+        """-t wins over the extension, so the warning must name -t's format."""
+        out_file = tmp_path / "out.dat"
+        rc = cli(
+            ["-o", str(out_file), "-t", "csv", str(multi_sheet_xlsx)],
+            stderr_isatty=False,
+        )
+        err = capsys.readouterr().err
+        assert rc == 0
+        assert "format 'csv'" in err
+        assert "'dat'" not in err
+
+    def test_fallback_to_cli_matches_bare_print(self, multi_sheet_xlsx, capsys):
+        """Stdout stays identical; only stderr distinguishes view from conversion."""
+        cli([str(multi_sheet_xlsx)], stderr_isatty=True)
+        printed = capsys.readouterr()
+        cli(["-t", "cli", str(multi_sheet_xlsx)], stderr_isatty=True)
+        exported = capsys.readouterr()
+        assert exported.out == printed.out
+        assert "more sheet(s)" in printed.err
+        assert "cannot hold all" in exported.err
+
+    # --- unrelated errors are not swallowed ---
+
+    def test_undetectable_target_format_not_swallowed(
+        self, multi_sheet_xlsx, tmp_path, capsys
+    ):
+        out_file = tmp_path / "out.zzz"
+        with pytest.raises(SystemExit) as excinfo:
+            cli(["-o", str(out_file), str(multi_sheet_xlsx)], stderr_isatty=False)
+        msg = str(excinfo.value)
+        assert "Unable to detect target file format" in msg
+        assert "cannot hold" not in msg
+        assert "cannot hold" not in capsys.readouterr().err
+        assert not out_file.exists()
+
+    def test_all_sheets_still_errors_where_default_falls_back(
+        self, multi_sheet_xlsx, tmp_path
+    ):
+        """Explicit flags stay strict; only the default is best-effort."""
+        out_file = tmp_path / "out.csv"
+        with pytest.raises(SystemExit) as excinfo:
+            cli(["--all-sheets", "-o", str(out_file), str(multi_sheet_xlsx)])
+        assert "pick one sheet with --sheet" in str(excinfo.value)
+
+    # --- degenerate inputs ---
+
+    def test_empty_workbook_names_the_source(self, empty_workbook):
+        """The default path names the file it read; selection reports structure."""
+        with pytest.raises(SystemExit) as excinfo:
+            cli([str(empty_workbook)], stderr_isatty=False)
+        assert f"No data was loaded from {empty_workbook}" in str(excinfo.value)
+
+    def test_one_sheet_json_book_renders_its_sheet(self, year_title_json, capsys):
+        """Previously this printed a bogus two-column title/data table."""
+        rc = cli([str(year_title_json)], stderr_isatty=True)
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert "month" in captured.out
+        assert "Jan" in captured.out
+        assert "data" not in captured.out
+        assert captured.err == ""
+
+    def test_headers_only_csv_still_reports_no_data(self, tmp_path):
+        p = tmp_path / "hdr.csv"
+        p.write_text("a,b\n")
+        with pytest.raises(SystemExit) as excinfo:
+            cli([str(p)], stderr_isatty=False)
+        assert f"No data was loaded from {p}" in str(excinfo.value)
+
+    def test_empty_first_sheet_advises_without_error(self, tmp_path, capsys):
+        """The book has data even when its first sheet does not."""
+        p = tmp_path / "sparse.json"
+        p.write_text(
+            json.dumps(
+                [
+                    {"title": "blank", "data": []},
+                    {"title": "full", "data": [{"name": "Alice"}]},
+                ]
+            )
+        )
+        rc = cli([str(p)], stderr_isatty=True)
+        assert rc == 0
+        assert "1 more sheet(s)" in capsys.readouterr().err
+
+    # --- stdin reads exactly like a file argument ---
+
+    def test_stdin_multi_sheet_keeps_all_sheets(self, multi_sheet_xlsx, capsys):
+        rc = cli(
+            ["-", "-f", "xlsx", "-t", "json"],
+            stdin=io.BytesIO(multi_sheet_xlsx.read_bytes()),
+            stderr_isatty=False,
+        )
+        captured = capsys.readouterr()
+        assert rc == 0
+        book = json.loads(captured.out)
+        assert [sheet["title"] for sheet in book] == ["people", "cities"]
+        assert captured.err == ""
+
+    def test_stdin_multi_sheet_fallback_warns(self, multi_sheet_xlsx, capsys):
+        rc = cli(
+            ["-", "-f", "xlsx", "-t", "csv"],
+            stdin=io.BytesIO(multi_sheet_xlsx.read_bytes()),
+            stderr_isatty=False,
+        )
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert "stdin: format 'csv' cannot hold all 2 sheets" in captured.err
+        assert captured.out.startswith("name,age")
+
+    def test_stdin_csv_unchanged(self, capsys):
+        rc = cli(
+            ["-", "-t", "json"],
+            stdin=io.BytesIO(b"name,age\nAlice,30\n"),
+            stderr_isatty=True,
+        )
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert json.loads(captured.out) == [{"name": "Alice", "age": "30"}]
+        assert captured.err == ""
 
 
 # --- terminal print rendering ---

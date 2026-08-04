@@ -49,6 +49,8 @@ Record design decisions as a new numbered entry in `docs/decisions.md`: `### NNN
 - User-facing strings (errors, warnings, hints, `--help`, README) never name
   Tablib internals like `Dataset`/`Databook` — say "sheet(s)"/"multi-sheet"
   (decision 019). Internal names are fine in code, docstrings, and dev docs.
+- Docstrings carry rationale in prose, never `(decision NNN)` citations — those
+  live only in `docs/` and this file. See `_unique_titles` for the house style.
 
 ## GitHub Actions & Dependabot
 
@@ -64,9 +66,20 @@ Record design decisions as a new numbered entry in `docs/decisions.md`: `### NNN
 - Dependabot bumps action SHAs + version comments and `uv.lock` (grouped,
   monthly, 7-day cooldown) — don't hand-bump pins, merge its PRs instead.
 
+## Tablib gotchas
+
+- `bool(Databook())` is always `True` — no `__len__`/`__bool__`. Test emptiness
+  with `not book.sheets()`; a `if not data:` guard is dead code for Databooks.
+- `Databook.export(fmt)` raises `UnsupportedFormat` for csv/tsv/dbf/cli/jira/
+  latex/sql at *any* size, size 1 included — capability is per-format, not
+  per-book. Book-capable: html/json/ods/rst/xls/xlsx/yaml.
+- `import_set()` on a book-shaped JSON/YAML (`[{title, data}, ...]`) silently
+  yields a bogus two-column `title`/`data` Dataset — which is why the
+  `try_load_*` handshake tries Databook first.
+
 ## Ruff gotchas
 
-- RUF001/2/3 flag ambiguous Unicode (e.g. `×`, `−`, `–`) in strings, comments, and docstrings — use ASCII equivalents.
+- RUF001/2/3 flag ambiguous Unicode (e.g. `×`, `−`, `–` EN DASH) in strings, comments, and docstrings — use ASCII equivalents. Em dash `—` is *not* flagged and is used freely in `src/`.
 - SIM108 turns `if/else` value-assignment into a ternary; if the ternary would nest ugly, build a base value then mutate it (e.g. `mode = "w" if write else "r"; if binary: mode += "b"`) instead of fighting it.
 - C901/PLR0912 cap functions at ~10 cyclomatic / ~12 branches — extract a helper before piling more guards into `_validate_args` or `cli`.
 - S101 forbids `assert` in `src/` (tests get it via per-file-ignores). For type narrowing, use an explicit `if x is None: raise TublubError(...)` instead, or extract a helper whose return type is already narrow (see `_default_export_handle`) rather than reaching for `typing.cast`.
@@ -90,3 +103,10 @@ Record design decisions as a new numbered entry in `docs/decisions.md`: `### NNN
 - Byte-exact output checks: `diff <(uv run tublub a.csv) <(uv run tublub -t cli a.csv)`
   for render identity; `uv run tublub -t json a.csv | xxd | tail -1` for trailing newlines.
 - Rejection tests use `pytest.raises(SystemExit)` since `parser.error()` exits.
+- Tests are grouped in `Test*` classes, not module-level `def test_` functions;
+  plain pytest classes, no `unittest.TestCase`. `docs/TODO.md` names the
+  expected class per feature. (Flattening to comment-grouped functions is a
+  Future item in `docs/TODO.md` — follow the class style until that lands.)
+- Smoke-testing TTY-gated output needs a real terminal:
+  `script -qec "uv run tublub FILE >/dev/null" /dev/null`. The Bash tool runs
+  `/bin/bash`, not the user's fish — use `<(...)`, not `psub`.
