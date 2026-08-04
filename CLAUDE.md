@@ -42,6 +42,8 @@ Record design decisions as a new numbered entry in `docs/decisions.md`: `### NNN
 
 A plan or implementation review may find a `docs/TODO.md` task's spec wrong; record the revision as a new decision entry that supersedes the task wording (021 → TODO 5, 024 → TODO 6) and have the `— DONE` summary cite it, rather than quietly rewriting the task.
 
+Not every departure needs a decision entry: a roadmap sub-task that turns out unnecessary or already shipped is just a note in the `— DONE` summary (TODO 8's fixtures, TODO 9's declined flag table). Reserve entries for real spec revisions.
+
 ## Conventions
 
 - Print statements are allowed (`T20` ignored in Ruff config) since this is a CLI tool.
@@ -94,6 +96,11 @@ A plan or implementation review may find a `docs/TODO.md` task's spec wrong; rec
 ## Testing patterns
 
 - Verifying CLI error paths: `just run` swallows stderr and only reports the exit code on failure. Run `uv run tublub ARGS` directly to see the actual `parser.error`/`sys.exit` message.
+- Proving a test can fail: for *new* behaviour write the test first and watch it
+  fail against the unchanged source — that is the same signal as mutating, minus
+  the risk. Mutation is only for reworked tests over code that already works;
+  apply *and revert* it with Edit, never `git checkout <file>`, which also
+  discards the uncommitted implementation you are testing.
 - Argparse unit tests: call `parse_command_line(argv)` directly and assert on the returned `args`.
 - CLI integration tests: call `cli([...])` with an argv list, read `capsys.readouterr().out`.
 - Don't monkeypatch `sys` globals — the IO edges take injection params (decision 020):

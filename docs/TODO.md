@@ -235,6 +235,34 @@ added rather than introducing a second list to keep in sync.
   a breaking output change for them. Open question for whoever ships it:
   stdin has no stem — keep Tablib's fallback, or name it `stdin`? Needs a
   decision entry when it lands.
+- **Don't clobber an existing output file silently.** *(Not multi-sheet — the
+  first non-roadmap item here; split this doc if more accumulate.)* Every
+  write path overwrites without asking, and the two-positional
+  `[INFILE [OUTFILE]]` form makes that easy to trigger by accident: a
+  `tublub -s 0 a.xlsx b.csv` meant as "two inputs" silently rewrites `b.csv`
+  (multi-input mode needs `-o`). Precedent for guarding it is `ffmpeg`, the
+  closest analogue — prompts by default, `-y`/`-n` to decide up front.
+  Sketch: `-n/--no-clobber` (refuse, non-zero exit) and `-y/--yes` (always
+  overwrite), mutually exclusive via `parser.error` like the other combo
+  rejections; both short flags are free. Default when neither is given:
+  prompt, question on **stderr** (stdout may be the data stream), gated on
+  `sys.stdin.isatty()`. That gate is self-enforcing — piped data means stdin
+  is not a terminal, so "reading data from stdin" and "able to ask a
+  question" are mutually exclusive by construction, and scripts never block.
+  The check belongs in the CLI layer, not in `save_dataset_file` /
+  `save_databook_file`: those stay reusable outside the CLI, and a library
+  helper must never block on stdin. Per 020 the two new IO edges
+  (`stdin_isatty`, and the answer read) need injection params, not
+  monkeypatched `sys` globals — `parse_command_line` already takes
+  `stdin_isatty`.
+  **Worth knowing before prioritising:** the prompt half only protects
+  humans. An agent harness is not a terminal (`sys.stdin.isatty()` is False
+  under Claude Code's Bash tool), so the default prompt would *not* have
+  caught the accidental overwrite described above — that was an agent. The
+  flags are the half that works everywhere, so ship `-n` first if only one
+  lands. Open question for whoever ships it: does `-n` on an existing file
+  exit 0 (nothing to do) or non-zero (refused)? GNU `cp -n` exits 0; a
+  converter arguably should fail loud. Needs a decision entry when it lands.
 - **`try_load_*` should resolve the input format once.** `try_load_file()`
   calls `load_databook_file()` then `load_dataset_file()`, and each calls
   `_resolve_input_format()`, which re-reads the file to detect and prints
