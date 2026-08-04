@@ -97,10 +97,14 @@ Not every departure needs a decision entry: a roadmap sub-task that turns out un
 
 - Verifying CLI error paths: `just run` swallows stderr and only reports the exit code on failure. Run `uv run tublub ARGS` directly to see the actual `parser.error`/`sys.exit` message.
 - Proving a test can fail: for *new* behaviour write the test first and watch it
-  fail against the unchanged source — that is the same signal as mutating, minus
-  the risk. Mutation is only for reworked tests over code that already works;
-  apply *and revert* it with Edit, never `git checkout <file>`, which also
-  discards the uncommitted implementation you are testing.
+  fail against the unchanged source — same signal as mutating, minus the risk.
+  With the implementation already written but uncommitted, get that red run back
+  with `git stash push src/tublub/main.py` (pathspec form — a bare `git stash`
+  would take the new tests too) then `git stash pop`: un-applying your own diff
+  is the most faithful mutation and `pop` restores it byte-exactly. Only for
+  *committed* code does hand-mutating apply; revert that with Edit. `git checkout`
+  / `git restore <file>` on a file holding uncommitted work discards it — and
+  stash cannot get it back afterwards, it only prevents the loss.
 - Argparse unit tests: call `parse_command_line(argv)` directly and assert on the returned `args`.
 - CLI integration tests: call `cli([...])` with an argv list, read `capsys.readouterr().out`.
 - Don't monkeypatch `sys` globals — the IO edges take injection params (decision 020):
