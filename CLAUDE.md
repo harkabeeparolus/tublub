@@ -40,6 +40,8 @@ When a `docs/TODO.md` roadmap item ships, mark its heading `— DONE` and collap
 
 Record design decisions as a new numbered entry in `docs/decisions.md`: `### NNN. Title`, `*YYYY-MM-DD · Accepted*`, then **Context** / **Decision** / **Why**. Supersede earlier entries explicitly rather than rewriting them.
 
+A plan or implementation review may find a `docs/TODO.md` task's spec wrong; record the revision as a new decision entry that supersedes the task wording (021 → TODO 5, 024 → TODO 6) and have the `— DONE` summary cite it, rather than quietly rewriting the task.
+
 ## Conventions
 
 - Print statements are allowed (`T20` ignored in Ruff config) since this is a CLI tool.
@@ -110,3 +112,12 @@ Record design decisions as a new numbered entry in `docs/decisions.md`: `### NNN
 - Smoke-testing TTY-gated output needs a real terminal:
   `script -qec "uv run tublub FILE >/dev/null" /dev/null`. The Bash tool runs
   `/bin/bash`, not the user's fish — use `<(...)`, not `psub`.
+- Test CSV fixtures need 2+ columns: `detect_format` returns `None` on a
+  single-column CSV, so it falls through to the TSV heuristic and every load
+  prints "Extension suggests csv but content detected as tsv".
+- `tmp_path.name` is ~31 chars — the same as `XLSX_TITLE_LIMIT` — so titles
+  qualified by it clamp to just the directory name. Assert exact qualified
+  titles against a short `tmp_path` subdirectory instead.
+- No multi-sheet workbook is tracked in the repo; build smoke-test inputs in
+  the scratchpad with tablib (`Databook()` + `export("xlsx")`). Untracked
+  sample files in the repo root are ad hoc — don't assume they exist.

@@ -223,6 +223,23 @@ now tested (`TestMultiInputExpansion`). An input contributing no sheets
 - `--list-sheets -t json` machine-readable listing — would lift the
   `--list-sheets`/`-t` mutual exclusion; don't foreclose it, don't build it
   yet.
+- **Title a single-input sheet after its input file.**
+  `tublub customers.csv out.xlsx` writes a sheet named `Tablib Dataset` —
+  Tablib's fallback when `Dataset.title` is `None`, which the single-input
+  path never sets. Only `build_databook()` assigns titles, so
+  `-o out.xlsx a.csv b.csv` names the sheets `a`/`b` while
+  `-o out.xlsx a.csv` names the one sheet `Tablib Dataset`: dropping the
+  second input changes how the *first* is named, the same arity surprise
+  021/024 outlawed for how inputs are *read*. Sketch: in the single-input
+  save/export path, title the sheet `path.stem` (through `_fit_title` for
+  the 31-char cap) **only when the input had no sheet structure** — an
+  observed sheet title must survive verbatim per 024, which it does today
+  (a one-sheet workbook already round-trips its real title). Visible only
+  in formats that carry sheet names (xlsx/ods/xls); records-shaped
+  json/yaml and the single-sheet text formats are unaffected, so it is not
+  a breaking output change for them. Open question for whoever ships it:
+  stdin has no stem — keep Tablib's fallback, or name it `stdin`? Needs a
+  decision entry when it lands.
 - **Flatten the test suite to module-level functions.** The `Test*` classes
   add an indentation level and `self` noise without using any class feature
   (no class-scoped fixtures or marks); the pytest-native style is flat
