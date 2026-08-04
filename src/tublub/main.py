@@ -36,6 +36,8 @@ class FormatConfig:
 _MIN_DATABOOK_INPUTS = 2  # 2+ inputs → multi-sheet Databook output
 XLSX_TITLE_LIMIT = 31  # XLSX caps worksheet titles at 31 characters
 _DASH = Path("-")
+_NAME_PREFIX = "name:"  # --sheet prefix forcing title interpretation
+_PICK_ONE_HINT = "pick one sheet with --sheet"
 
 
 # https://tablib.readthedocs.io/en/stable/formats.html
@@ -66,6 +68,8 @@ def cli(argv: list[str] | None = None) -> int:
         return 0
     if args.list_sheets:
         return _run_list_sheets(args, extra_args)
+    if args.sheets is not None or args.all_sheets:
+        return _run_sheets(args, extra_args)
     if len(args.infiles) >= _MIN_DATABOOK_INPUTS:
         return _run_databook(args, extra_args)
     return _run_single(args, extra_args)
@@ -89,21 +93,44 @@ def _run_single(args: argparse.Namespace, extra_args: dict[str, Any]) -> int:
         sys.exit(f"No data was loaded from {source}")
 
     try:
-        if args.outfile:
-            save_dataset_file(
-                my_data,
-                file_name=args.outfile,
-                force_format=args.out_format,
-                extra_args=extra_args,
-            )
-        elif args.out_format:
-            export_dataset(my_data, args.out_format, extra_args=extra_args)
-        else:
-            print(my_data)
+        _render_dataset(my_data, args, extra_args)
     except TublubError as exc:
         sys.exit(str(exc))
 
     return 0
+
+
+def _render_dataset(
+    data: tablib.Dataset, args: argparse.Namespace, extra_args: dict[str, Any]
+) -> None:
+    """Render one dataset through the output mode selected by args.
+
+    Save to -o, export via -t, or print as a table — the shared tail of
+    every single-sheet code path.
+    """
+    if args.outfile:
+        save_dataset_file(
+            data,
+            file_name=args.outfile,
+            force_format=args.out_format,
+            extra_args=extra_args,
+        )
+    elif args.out_format:
+        export_dataset(data, args.out_format, extra_args=extra_args)
+    else:
+        print(_format_dataset_as_table(data, extra_args))
+
+
+def _format_dataset_as_table(data: tablib.Dataset, extra_args: dict[str, Any]) -> str:
+    """Format a dataset for terminal printing, honouring --tablefmt.
+
+    Without table options this is tablib's plain default table; with them,
+    the "cli" export renders the requested tabulate style.
+    """
+    save_args = filter_args("save", extra_args, "cli")
+    if save_args:
+        return data.export("cli", **save_args)
+    return str(data)
 
 
 def _run_list_sheets(args: argparse.Namespace, extra_args: dict[str, Any]) -> int:
@@ -122,6 +149,153 @@ def _run_list_sheets(args: argparse.Namespace, extra_args: dict[str, Any]) -> in
         ncols = len(loaded.headers or [])
         print(f"{len(loaded)} rows x {ncols} cols")
     return 0
+
+
+def _run_sheets(args: argparse.Namespace, extra_args: dict[str, Any]) -> int:
+    """Select sheets with --sheet/--all-sheets from one input and render them."""
+    path: Path = args.infiles[0]
+    try:
+        loaded = try_load_file(path, extra_args=extra_args, in_format=args.in_format)
+        _render_selection(loaded, args, extra_args, source=str(path))
+    except TublubError as exc:
+        sys.exit(str(exc))
+    return 0
+
+
+def _render_selection(
+    loaded: tablib.Databook | tablib.Dataset,
+    args: argparse.Namespace,
+    extra_args: dict[str, Any],
+    source: str,
+) -> None:
+    """Resolve the sheet selection on a loaded input and render the result.
+
+    One selected sheet renders exactly like a single-sheet input; several
+    render as a multi-sheet subset. --all-sheets names no specific
+    structure, so on an input without sheet structure it is the identity
+    modifier: a plain single render, matching _run_single.
+    """
+    if isinstance(loaded, tablib.Dataset):
+        if args.sheets is not None:
+            msg = "input has no sheet structure"
+            raise TublubError(msg)
+        if not loaded:
+            msg = f"No data was loaded from {source}"
+            raise TublubError(msg)
+        _render_dataset(loaded, args, extra_args)
+        return
+    sheets = loaded.sheets()
+    if not sheets:
+        msg = "workbook has no sheets"
+        raise TublubError(msg)
+    if args.all_sheets:
+        indices = list(range(len(sheets)))
+    else:
+        indices = _resolve_sheet_tokens(sheets, args.sheets)
+    if len(indices) == 1:
+        _render_dataset(sheets[indices[0]], args, extra_args)
+    else:
+        _render_databook(_databook_subset(sheets, indices), args, extra_args)
+
+
+def _resolve_sheet_tokens(sheets: list[tablib.Dataset], tokens: list[str]) -> list[int]:
+    """Resolve selector tokens to sheet indices; dedup keeps first occurrence."""
+    return list(dict.fromkeys(_resolve_one_token(sheets, t) for t in tokens))
+
+
+def _resolve_one_token(sheets: list[tablib.Dataset], token: str) -> int:
+    """Resolve one selector token: name:-forced title, index, or title."""
+    if token.startswith(_NAME_PREFIX):
+        # Strip exactly one prefix; "name:name:X" selects the literal "name:X".
+        return _match_title(sheets, token.removeprefix(_NAME_PREFIX))
+    if _is_int_token(token):
+        return _resolve_index(sheets, token)
+    return _match_title(sheets, token)
+
+
+def _resolve_index(sheets: list[tablib.Dataset], token: str) -> int:
+    """Resolve an integer token as a 0-based sheet index (never as a title)."""
+    idx = int(token)
+    if 0 <= idx < len(sheets):
+        return idx
+    msg = f"sheet index {idx} out of range (0-{len(sheets) - 1})"
+    if any(sheet.title == token for sheet in sheets):
+        msg += f"; for the sheet titled '{token}' use --sheet name:{token}"
+    raise TublubError(msg)
+
+
+def _match_title(sheets: list[tablib.Dataset], wanted: str) -> int:
+    """Match a title exactly, then case-insensitively; ambiguity is an error.
+
+    Sheets with empty titles are unmatchable by title (index selection
+    still reaches them).
+    """
+    titled = [
+        (idx, title) for idx, sheet in enumerate(sheets) if (title := sheet.title)
+    ]
+    exact = [idx for idx, title in titled if title == wanted]
+    hits = exact or [idx for idx, title in titled if title.lower() == wanted.lower()]
+    if len(hits) == 1:
+        return hits[0]
+    if hits:
+        listing = ", ".join(f"[{idx}] '{sheets[idx].title}'" for idx in hits)
+        msg = f"sheet title '{wanted}' is ambiguous: matches {listing}; select by index"
+        raise TublubError(msg)
+    raise TublubError(_no_title_match_msg(wanted, titled))
+
+
+def _no_title_match_msg(wanted: str, titled: list[tuple[int, str]]) -> str:
+    """Compose the no-such-title error, listing what is selectable."""
+    titles = ", ".join(f"'{title}'" for _, title in titled)
+    msg = f"no sheet titled '{wanted}'; available titles: {titles}"
+    if "," in wanted:
+        msg += "; repeat --sheet to select multiple sheets by name"
+    return msg
+
+
+def _databook_subset(
+    sheets: list[tablib.Dataset], indices: list[int]
+) -> tablib.Databook:
+    """Build a Databook holding the given sheets, in the given order.
+
+    Duplicate titles (legal in JSON/YAML books) are kept as-is; XLSX
+    writers may rename them on save.
+    """
+    book = tablib.Databook()
+    for idx in indices:
+        book.add_sheet(sheets[idx])
+    return book
+
+
+def _render_databook(
+    book: tablib.Databook, args: argparse.Namespace, extra_args: dict[str, Any]
+) -> None:
+    """Render a multi-sheet selection through the output mode selected by args.
+
+    Mirrors _render_dataset's save/export/print tail for Databooks.
+    """
+    if args.outfile:
+        save_databook_file(
+            book,
+            file_name=args.outfile,
+            force_format=args.out_format,
+            extra_args=extra_args,
+            hint=_PICK_ONE_HINT,
+        )
+    elif args.out_format:
+        export_databook(book, args.out_format, extra_args, hint=_PICK_ONE_HINT)
+    else:
+        print_databook(book, extra_args)
+
+
+def print_databook(book: tablib.Databook, extra_args: dict[str, Any]) -> None:
+    """Print each sheet under a heading, one blank line between sheets."""
+    chunks = []
+    for sheet in book.sheets():
+        heading = f"=== {sheet.title} ({len(sheet)} rows) ==="
+        body = _format_dataset_as_table(sheet, extra_args)
+        chunks.append(f"{heading}\n{body}" if body else heading)
+    print("\n\n".join(chunks))
 
 
 def _run_databook(args: argparse.Namespace, extra_args: dict[str, Any]) -> int:
@@ -414,23 +588,49 @@ def save_databook_file(
     file_name: Path,
     extra_args: dict[str, Any],
     force_format: str | None = None,
+    *,
+    hint: str | None = None,
 ) -> None:
-    """Save a Tablib Databook (multi-sheet workbook) to a file."""
+    """Save a Tablib Databook (multi-sheet workbook) to a file.
+
+    hint, when given, is appended to the unsupported-format error message
+    (the advice differs per caller: sheet selection can suggest --sheet,
+    the multi-input path must not).
+    """
     file_format = _resolve_output_format(force_format, file_name)
 
     cfg = FORMATS.get(file_format, _DEFAULT_FMT)
-    extra_save_args = filter_args("save", extra_args, file_format)
-
-    try:
-        output = book.export(file_format, **extra_save_args)
-    except tablib.UnsupportedFormat as exc:
-        msg = f"Format {file_format!r} does not support multi-sheet output"
-        raise TublubError(msg) from exc
-
     with _open_for_format(file_name, cfg, write=True) as fh:
-        fh.write(output)
+        export_databook(book, file_format, extra_args, file_handle=fh, hint=hint)
 
     print(f"Saved '{file_name}', {book.size} sheets ({file_format})")
+
+
+def export_databook(
+    book: tablib.Databook,
+    target_format: str,
+    extra_args: dict[str, Any],
+    file_handle: IO[str] | IO[bytes] | None = None,
+    *,
+    hint: str | None = None,
+) -> None:
+    """Export a Databook to a file handle or other stream.
+
+    Mirrors export_dataset. Multi-sheet capability is discovered by
+    attempting the export, never from a static table; hint is appended
+    to the unsupported-format error message when given.
+    """
+    if file_handle is None:
+        file_handle = _default_export_handle(target_format)
+    extra_save_args = filter_args("save", extra_args, target_format)
+    try:
+        output = book.export(target_format, **extra_save_args)
+    except tablib.UnsupportedFormat as exc:
+        msg = f"Format {target_format!r} does not support multi-sheet output"
+        if hint:
+            msg += f"; {hint}"
+        raise TublubError(msg) from exc
+    file_handle.write(output)
 
 
 def _fit_title(base: str, suffix: str = "") -> str:
@@ -582,8 +782,45 @@ def parse_command_line(
     args.infiles = infiles
 
     _validate_args(parser, args)
+    args.sheets = _cook_sheet_tokens(parser, args.sheets)
 
     return args, _collect_extra_args(args)
+
+
+def _cook_sheet_tokens(
+    parser: argparse.ArgumentParser, occurrences: list[str] | None
+) -> list[str] | None:
+    """Expand --sheet occurrences into selector tokens.
+
+    An occurrence is comma-split only when every comma-piece is an integer
+    (after strip); otherwise it is one literal title token, kept whole so
+    titles like "Revenue, EMEA" survive.
+    """
+    if occurrences is None:
+        return None
+    tokens: list[str] = []
+    for occ in occurrences:
+        tokens.extend(_cook_one_occurrence(parser, occ))
+    return tokens
+
+
+def _cook_one_occurrence(parser: argparse.ArgumentParser, occ: str) -> list[str]:
+    """Split one --sheet occurrence into tokens (see _cook_sheet_tokens)."""
+    pieces = [p.strip() for p in occ.split(",")]
+    if not all(pieces):
+        parser.error("no sheet selector given")
+    if all(_is_int_token(p) for p in pieces):
+        return pieces
+    return [occ]
+
+
+def _is_int_token(token: str) -> bool:
+    """Return True if the token parses as an integer."""
+    try:
+        int(token)
+    except ValueError:
+        return False
+    return True
 
 
 def _should_use_implicit_stdin(
@@ -663,6 +900,23 @@ def _validate_list_sheets(
         parser.error("--list-sheets accepts only one input file")
 
 
+def _validate_sheet(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Reject flag combos and input shapes incompatible with --sheet/--all-sheets."""
+    if args.sheets is not None and args.all_sheets:
+        parser.error("Can not combine --sheet with --all-sheets")
+    flag = "--sheet" if args.sheets is not None else "--all-sheets"
+    if args.list_formats:
+        parser.error(f"Can not combine {flag} with --list-formats")
+    if args.list_sheets:
+        parser.error(f"Can not combine {flag} with --list-sheets")
+    if args.stdin:
+        parser.error(f"{flag} does not yet support stdin input")
+    if not args.infiles:
+        parser.error(f"{flag} requires an input file")
+    if len(args.infiles) > 1:
+        parser.error(f"{flag} is not supported with multiple inputs")
+
+
 def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     """Validate parsed args; calls parser.error (which exits) on problems."""
     if args.list_formats and (args.infiles or args.outfile):
@@ -670,6 +924,9 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
 
     if args.list_sheets:
         _validate_list_sheets(parser, args)
+
+    if args.sheets is not None or args.all_sheets:
+        _validate_sheet(parser, args)
 
     if not args.list_formats and not args.infiles and not args.stdin:
         parser.error("No input data provided.")
@@ -757,6 +1014,27 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help=(
             'list sheets in the input file and exit: "[idx] title  rows x cols" '
             'per sheet, or one bare "rows x cols" line if the input has no sheets'
+        ),
+    )
+    input_group.add_argument(
+        "-s",
+        "--sheet",
+        dest="sheets",
+        metavar="SEL",
+        action="append",
+        help=(
+            "select sheet(s) by 0-based index or title: '-s 0,2' picks "
+            "indices, repeat -s to pick several titles, 'name:2024' forces "
+            "a title match"
+        ),
+    )
+    input_group.add_argument(
+        "--all-sheets",
+        dest="all_sheets",
+        action="store_true",
+        help=(
+            "select every sheet of a multi-sheet input; on an input without "
+            "sheet structure this changes nothing"
         ),
     )
 

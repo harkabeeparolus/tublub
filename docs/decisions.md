@@ -509,3 +509,51 @@ signature, because a `sys.stdout` default is captured at definition time —
 the exact bug fixed in 0.4.0. New IO edges (TODO 5's stderr TTY gate,
 TODO 7's stdin routing) must follow this pattern. Internal refactor, no
 CHANGELOG entry.
+
+---
+
+### 021. Default conversion of a multi-sheet input goes whole-book; warn-fallback to first sheet
+*2026-08-04 · Accepted*
+
+**Context.** TODO 5's spec had default conversion (`-o`/`-t`, no selection
+flags) of a multi-sheet input convert only the first sheet, with an
+unconditional data-loss warning. The TODO 4 plan review (2026-08-04) found
+this inconsistent with TODO 6's default: multi-input mode expands *every*
+sheet of every input into the output, so
+`tublub -o out.xlsx book.xlsx extra.csv` includes all of book.xlsx's sheets
+while `tublub -o out.xlsx book.xlsx` would keep only the first — dropping
+the second input from the command silently shrinks how the first is read.
+
+**Decision.**
+- Default conversion mirrors `--all-sheets`: an input observed to have
+  sheet structure with 2+ sheets attempts a whole-book save/export; a
+  size-1 workbook or structureless input behaves exactly as today (per
+  017, one sheet takes the single-sheet path). Capability is discovered by
+  attempting the export and catching failure (008), never from a table.
+- When the target format cannot hold multiple sheets, default mode falls
+  back to the first sheet with an **unconditional** stderr data-loss
+  warning. The warning suggests `-s` only — never `--all-sheets`, which
+  errors in that same situation.
+- Explicit flags stay strict: `--all-sheets` and multi-sheet `--sheet`
+  selections error where the default falls back. Asking for all sheets by
+  name is a demand; the default is best-effort.
+- Terminal print default is unchanged: first sheet plus the TTY-gated
+  advice line (a 30-sheet dump to a terminal is noise, unlike a file).
+- `--all-sheets` stays long-only (no `-a` short flag): the default absorbs
+  its main daily use, whole-workbook conversion.
+
+**Why.** Converters convert the whole document by default (pandoc does not
+translate only chapter one); a converter that drops data by default
+surprises exactly the users who least expect it. The uniformity argument
+from 017 applies to arity here too: adding or removing a second input must
+not change how the first is read. Whole-book-by-default also makes the
+data-loss warning rare and meaningful — it fires only when the target
+genuinely cannot hold the sheets. Accepted cost: output shape now depends
+on sheet count (records-JSON for one sheet, book-JSON for several), but
+`--all-sheets` already has that property under 017's one-sheet rule, and
+scripts needing a stable shape pin `-s 0`. Implementation lands with the
+TODO 5 increment, reusing TODO 4's `_render_databook`/`export_databook`;
+the fallback needs a distinct failure signal (e.g. a `TublubError`
+subclass) so it never swallows unrelated errors. This supersedes the
+conversion-warning clause of the 2026-07-04 TODO 5 spec; the advice-line
+clause stands. (Recorded at the TODO 4 plan review.)

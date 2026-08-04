@@ -6,6 +6,8 @@
 > single-sheet rejection rule and list format. Respec'd 2026-07-04 after a
 > design review; item numbers changed (old TODOs 3/4/5 merged into today's
 > TODO 4 — decision 016's "TODO 3" refers to the old numbering).
+> Decision **021** (2026-08-04, TODO 4 plan review) respec'd TODO 5: default
+> conversion goes whole-book when the target can hold it.
 
 A staged plan for extending tublub so a single input file with multiple
 sheets (XLSX/ODS/XLS/JSON/YAML) can be inspected, displayed, and converted.
@@ -45,7 +47,8 @@ save side.
 | Invocation | Result |
 |---|---|
 | `tublub book.xlsx` (terminal) | Print first sheet; stderr advice about the rest, gated on TTY |
-| `tublub book.xlsx out.csv` | Convert first sheet; **always** warn "converting only the first of N sheets" |
+| `tublub book.xlsx out.ods` | Convert **all** sheets — default conversion goes whole-book when the target can hold it (021) |
+| `tublub book.xlsx out.csv` | Fallback: convert first sheet; **always** warn "converting only the first of N sheets" |
 | `tublub -l book.xlsx` | `[idx] title  N rows x M cols` per sheet, exit 0 |
 | `tublub -l people.csv` | One bare `N rows x M cols` line — no index/title, nothing to select |
 | `tublub -s Users book.xlsx` | Load only `Users`; behaves like a single Dataset (print / `-o` / `-t`) |
@@ -78,7 +81,8 @@ sheet.
 - `FormatConfig` / `FORMATS` — keep as-is; still no `databook: bool` (008).
 - `filter_args()` — no change needed.
 - `save_databook_file()` — the one multi-sheet save path; reuse everywhere.
-- `_default_export_handle()` — generalise for Databook stdout export (TODO 4).
+- `export_databook()` / `_render_databook()` — shipped with TODO 4; the
+  multi-sheet export/save/print path TODO 5 reuses for whole-book defaults.
 - `_unique_titles()` — widen to accept pre-derived titles (TODO 6).
 - `TublubError` boundary — keep the pattern.
 
@@ -111,113 +115,62 @@ select. Empty workbook prints nothing, exit 0. Output shape documented in
 
 ---
 
-## TODO 4 — `-s/--sheet` and `--all-sheets`: selection + rendering (decision 017)
+## TODO 4 — `-s/--sheet` and `--all-sheets`: selection + rendering (decision 017) — DONE
 
-**Goal:** Pick sheets by index or title, or all of them, and render the
-result through every existing output mode. Merges old TODOs 3/4/5.
-
-### Argparse & validation
-
-- `-s/--sheet SEL`, `action="append"`, default `None`; `--all-sheets`,
-  `store_true`. Mutually exclusive with each other and with
-  `--list-formats`/`--list-sheets`.
-- Cook occurrences into `args.sheets: list[str]`: an occurrence is
-  comma-split **only when every comma-piece is an integer** (after strip);
-  otherwise it is one literal title token ("Revenue, EMEA" stays whole).
-  An empty occurrence or piece (`--sheet ,`, `--sheet ""`) is a usage error
-  ("no sheet selector given").
-- `_validate_sheet` mirroring `_validate_list_sheets`: single local file
-  only in this increment — reject stdin (TODO 7) and 2+ inputs (TODO 6
-  rejects them permanently).
-
-### Resolution (per token, against `book.sheets()`)
-
-- `name:REST` → forced title match on REST (strip exactly one `name:`; a
-  literal title starting with `name:` needs the prefix doubled).
-- Integer token → 0-based index, **always** (016). Out of range →
-  `TublubError` "sheet index N out of range (0-M)"; if some sheet's title
-  equals the token, append "for the sheet titled 'N' use --sheet name:N".
-  Never fall back from index to title.
-- Anything else → title match: exact, then case-insensitive. Multiple hits
-  at either stage (duplicate titles are legal in JSON/YAML books) → error
-  listing the candidate indices. No hit → error listing all titles; if the
-  token contains a comma, add "repeat --sheet to select multiple sheets by
-  name".
-- Title matching skips empty titles; index selection reaches everything.
-- Empty workbook → "workbook has no sheets".
-- Structure gate: input loaded as a fallback Dataset → "input has no sheet
-  structure" (observational, 008-safe). Applies to `--sheet` only —
-  `--all-sheets` names no specific structure, so on a structureless input
-  it is the identity modifier (plain single render, old TODO 4's
-  "no special-casing" kept).
-
-### Dispatch & rendering (`_run_sheets`)
-
-- Load via `try_load_file()`; resolve tokens; dedup by resolved index,
-  keeping first occurrence, preserving selection order. `--all-sheets` =
-  select every index, same path from here on.
-- **1 sheet selected** → `_render_dataset(ds, args, extra_args)`, extracted
-  from the tail of `_run_single` (save to `-o` / export via `-t` / print),
-  so selection reuses the real renderer and can't drift.
-- **N sheets selected** → build a fresh Databook from the subset, then:
-  - `-o FILE` → `save_databook_file()`. Refine its UnsupportedFormat
-    message to "...does not support multi-sheet output; pick one sheet
-    with --sheet".
-  - `-t FMT` (no `-o`) → attempt `book.export(fmt)`, catch
-    `UnsupportedFormat` with the same message; route bytes/str through a
-    Databook-aware `_default_export_handle` (binary to a pipe is fine,
-    binary to a TTY refuses, as today).
-  - neither → `print_databook(book)`:
-
-    ```
-    === <title> (<N> rows) ===
-    <tabulated sheet, honouring --tablefmt>
-
-    ```
-    One blank line between sheets, none after the last; empty sheets still
-    get a heading. Extract `_format_dataset_as_table(ds)` shared with the
-    single-Dataset print path.
-
-**Tests** — pick by name / index / comma-int list; "0,Users" treated as one
-literal title (miss lists titles); repeated `-s`; selection order preserved;
-duplicates deduped; `name:` forced title; `name:2024` vs index 2024 plus the
-error hint; duplicate-title ambiguity errors with indices; case-insensitive
-ambiguity (`users` + `USERS` vs `Users`); unknown name lists titles;
-out-of-range; empty workbook message; empty-string titles selectable by
-index only; csv and records-json rejected ("no sheet structure"); size-1
-xlsx selectable by `0` and by title; multi-select terminal print layout;
-multi-select `-t json` to stdout; multi-select `-o out.xlsx` round-trip;
-multi-select `-o out.csv` errors with advice; `--all-sheets` on csv is a
-plain render; `--all-sheets` print/save/export; mutual exclusions; stdin and
-multi-input rejection.
+Shipped (unreleased): `-s/--sheet` (0-based index / title / comma-int lists /
+repeated occurrences / `name:` escape) and `--all-sheets`, resolved against
+observed structure with dedup and selection-order preservation. One selected
+sheet renders exactly like a single-sheet input; several render as a
+multi-sheet subset through terminal print (`=== title (N rows) ===`
+headings), `-o` save, and `-t` export via the attempt-and-catch pattern.
+`--all-sheets` on a structureless input is the identity modifier. Extracted
+`_render_dataset` / `_format_dataset_as_table` / `export_databook`
+(hint-parametrized so the multi-input path never advises the `--sheet` it
+rejects); `--tablefmt` now also styles the default stdout table.
 
 ---
 
-## TODO 5 — Advice vs data-loss warning in default mode
+## TODO 5 — Default mode: whole-book conversion + advice (decision 021)
 
-**Goal:** Make extra sheets discoverable, and never drop them silently.
-These are two different messages (design review, 2026-07-04).
+**Goal:** Default mode never drops sheets silently: conversion goes
+whole-book when the target can hold it, warn-falls-back to the first sheet
+when it can't, and terminal print makes extra sheets discoverable.
+(Respec'd 2026-08-04 at the TODO 4 plan review — decision 021 replaced the
+original always-first-sheet conversion rule, which was inconsistent with
+TODO 6's expand-everything default.)
 
 **Tasks**
 - Default single-input mode loads via `try_load_file()` once (no re-read to
-  count sheets). On a Databook with `size > 1`, take `sheets()[0]` and:
-  - **Terminal print** (no `-o`/`-t`): stderr *advice*, gated on
-    `sys.stderr.isatty()`:
+  count sheets). On a Databook with `size > 1`:
+  - **Terminal print** (no `-o`/`-t`): print `sheets()[0]`; stderr *advice*,
+    gated on `sys.stderr.isatty()` (injectable per 020):
     `f"{file}: {size - 1} more sheet(s) — see -l to list, -s to pick, --all-sheets for all"`.
     Advice in a pipe is noise; a TTY gate is the cheap proxy for "a human
     is watching".
-  - **Conversion** (`-o` or `-t`): stderr *data-loss warning*,
+  - **Conversion** (`-o` or `-t`): attempt the whole book through the
+    TODO 4 helpers (`save_databook_file` / `export_databook`, no hint).
+    When the target format cannot hold multiple sheets, fall back to
+    `sheets()[0]` via `_render_dataset` with a stderr *data-loss warning*,
     **unconditional**:
-    `f"{file}: converting only the first of {size} sheets (use -s to choose, --all-sheets for all)"`.
+    `f"{file}: format {fmt!r} cannot hold all {size} sheets; converting only the first (use -s to choose)"`.
     Dropping sheets is a correctness issue, not advice — scripts must see
-    it.
-- Size-1 Databook or fallback Dataset: no message.
+    it. The warning suggests `-s` only, never `--all-sheets`, which errors
+    in that same situation (explicit flags stay strict; only the default
+    falls back). The fallback must trigger only on the multi-sheet-
+    unsupported failure — likely a dedicated `TublubError` subclass raised
+    by `export_databook`, so unrelated errors (undetectable target format,
+    IO) still propagate.
+- Size-1 Databook or fallback Dataset: no message, exactly today's
+  behavior (mirrors `--all-sheets` semantics per 017/021).
 - `--sheet`/`--all-sheets`/`--list-sheets` take other dispatch paths, so
   the messages are naturally suppressed there.
 
-**Tests** — hint present on TTY stderr and absent when piped (monkeypatch
-`isatty`); conversion warning present regardless of TTY for both `-o` and
-`-t`; no message for single-sheet inputs or with `-s`/`--all-sheets`.
+**Tests** — advice present on TTY stderr and absent when piped (injectable
+isatty, no monkeypatching); whole-book default: `book.xlsx` + `-o out.json`
+/ `-t json` yields all sheets; fallback: `-o out.csv` / `-t csv` emits the
+first sheet plus the warning regardless of TTY; unrelated save errors not
+swallowed by the fallback; no message for single-sheet inputs or with
+`-s`/`--all-sheets`.
 
 ---
 
@@ -302,7 +255,7 @@ clamped to 31 chars; `-s`/`--all-sheets` with 2+ inputs rejected.
 ## Open questions
 
 None right now — resolved questions are recorded in
-[`decisions.md`](decisions.md) (016-019).
+[`decisions.md`](decisions.md) (016-021).
 
 ## Verification when each TODO ships
 

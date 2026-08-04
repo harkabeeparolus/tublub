@@ -1,6 +1,7 @@
 """Tests for tublub.main."""
 
 import io
+import json
 from pathlib import Path
 
 import pytest
@@ -799,3 +800,361 @@ class TestListSheets:
     def test_two_inputs_rejected(self, sample_csv, sample_json):
         with pytest.raises(SystemExit):
             parse_command_line(["--list-sheets", str(sample_csv), str(sample_json)])
+
+
+# --- -s/--sheet ---
+
+
+class TestSheetSelect:
+    # argparse level: token cooking and rejections
+
+    def test_occurrences_append(self, multi_sheet_xlsx):
+        args, _ = parse_command_line(
+            ["-s", "Users", "-s", "cities", str(multi_sheet_xlsx)]
+        )
+        assert args.sheets == ["Users", "cities"]
+
+    def test_comma_split_when_all_ints(self, multi_sheet_xlsx):
+        args, _ = parse_command_line(["-s", " 0 , 2 ", str(multi_sheet_xlsx)])
+        assert args.sheets == ["0", "2"]
+
+    def test_mixed_comma_stays_literal(self, multi_sheet_xlsx):
+        args, _ = parse_command_line(["-s", "0,Users", str(multi_sheet_xlsx)])
+        assert args.sheets == ["0,Users"]
+
+    def test_title_with_comma_stays_whole(self, multi_sheet_xlsx):
+        args, _ = parse_command_line(["-s", "Revenue, EMEA", str(multi_sheet_xlsx)])
+        assert args.sheets == ["Revenue, EMEA"]
+
+    @pytest.mark.parametrize("selector", ["", ",", "0,", " , "])
+    def test_empty_selector_rejected(self, multi_sheet_xlsx, selector):
+        with pytest.raises(SystemExit):
+            parse_command_line(["-s", selector, str(multi_sheet_xlsx)])
+
+    def test_combined_with_all_sheets_rejected(self, multi_sheet_xlsx):
+        with pytest.raises(SystemExit):
+            parse_command_line(["-s", "0", "--all-sheets", str(multi_sheet_xlsx)])
+
+    def test_combined_with_list_sheets_rejected(self, multi_sheet_xlsx):
+        with pytest.raises(SystemExit):
+            parse_command_line(["-s", "0", "--list-sheets", str(multi_sheet_xlsx)])
+
+    def test_combined_with_list_formats_rejected(self):
+        with pytest.raises(SystemExit):
+            parse_command_line(["-s", "0", "--list-formats"])
+
+    def test_stdin_explicit_rejected(self):
+        with pytest.raises(SystemExit):
+            parse_command_line(["-s", "0", "-"])
+
+    def test_stdin_implicit_rejected(self):
+        with pytest.raises(SystemExit):
+            parse_command_line(["-s", "0"], stdin_isatty=False)
+
+    def test_no_input_rejected(self):
+        with pytest.raises(SystemExit):
+            parse_command_line(["-s", "0"], stdin_isatty=True)
+
+    def test_multiple_inputs_rejected(self, sample_csv, sample_json, tmp_path):
+        out = tmp_path / "out.xlsx"
+        with pytest.raises(SystemExit):
+            parse_command_line(
+                ["-s", "0", "-o", str(out), str(sample_csv), str(sample_json)]
+            )
+
+    # cli level: resolution
+
+    def test_pick_by_index(self, multi_sheet_xlsx, capsys):
+        rc = cli(["-s", "1", str(multi_sheet_xlsx)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "Stockholm" in out
+        assert "Alice" not in out
+        assert "===" not in out
+
+    def test_pick_by_title(self, multi_sheet_xlsx, capsys):
+        rc = cli(["-s", "people", str(multi_sheet_xlsx)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "Alice" in out
+        assert "===" not in out
+
+    def test_pick_by_case_insensitive_title(self, multi_sheet_xlsx, capsys):
+        rc = cli(["-s", "PEOPLE", str(multi_sheet_xlsx)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "Alice" in out
+
+    def test_year_index_out_of_range_hints_name(self, year_title_json):
+        with pytest.raises(SystemExit) as excinfo:
+            cli(["-s", "2024", str(year_title_json)])
+        msg = str(excinfo.value)
+        assert "sheet index 2024 out of range (0-0)" in msg
+        assert "--sheet name:2024" in msg
+
+    def test_name_prefix_forces_title(self, year_title_json, capsys):
+        rc = cli(["-s", "name:2024", str(year_title_json)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "Jan" in out
+
+    def test_out_of_range_without_matching_title(self, multi_sheet_xlsx):
+        with pytest.raises(SystemExit) as excinfo:
+            cli(["-s", "9", str(multi_sheet_xlsx)])
+        msg = str(excinfo.value)
+        assert "sheet index 9 out of range (0-1)" in msg
+        assert "name:" not in msg
+
+    def test_doubled_name_prefix_escapes_literal(self, tmp_path, capsys):
+        book = [{"title": "name:2024", "data": [{"month": "Jan"}]}]
+        p = tmp_path / "odd.json"
+        p.write_text(json.dumps(book))
+        rc = cli(["-s", "name:name:2024", str(p)])
+        assert rc == 0
+        assert "Jan" in capsys.readouterr().out
+
+    def test_duplicate_titles_ambiguous(self, dup_title_json):
+        with pytest.raises(SystemExit) as excinfo:
+            cli(["-s", "Users", str(dup_title_json)])
+        msg = str(excinfo.value)
+        assert "ambiguous" in msg
+        assert "[0]" in msg
+        assert "[2]" in msg
+
+    def test_case_insensitive_ambiguous(self, case_dup_json):
+        with pytest.raises(SystemExit) as excinfo:
+            cli(["-s", "Users", str(case_dup_json)])
+        assert "ambiguous" in str(excinfo.value)
+
+    def test_exact_match_beats_case_insensitive(self, case_dup_json, capsys):
+        rc = cli(["-s", "users", str(case_dup_json)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "Alice" in out
+        assert "Bob" not in out
+
+    def test_unknown_title_lists_titles(self, multi_sheet_xlsx):
+        with pytest.raises(SystemExit) as excinfo:
+            cli(["-s", "nope", str(multi_sheet_xlsx)])
+        msg = str(excinfo.value)
+        assert "no sheet titled 'nope'" in msg
+        assert "'people'" in msg
+        assert "'cities'" in msg
+        assert "repeat --sheet" not in msg
+
+    def test_comma_miss_adds_repeat_hint(self, multi_sheet_xlsx):
+        with pytest.raises(SystemExit) as excinfo:
+            cli(["-s", "0,people", str(multi_sheet_xlsx)])
+        msg = str(excinfo.value)
+        assert "no sheet titled '0,people'" in msg
+        assert "repeat --sheet to select multiple sheets by name" in msg
+
+    def test_empty_workbook_errors(self, empty_workbook):
+        with pytest.raises(SystemExit) as excinfo:
+            cli(["-s", "0", str(empty_workbook)])
+        assert "workbook has no sheets" in str(excinfo.value)
+
+    def test_empty_title_selectable_by_index_only(self, empty_title_json, capsys):
+        rc = cli(["-s", "0", str(empty_title_json)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "Alice" in out
+
+    def test_empty_title_skipped_in_title_match(self, empty_title_json, capsys):
+        rc = cli(["-s", "named", str(empty_title_json)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "Bob" in out
+
+    @pytest.mark.parametrize("fixture", ["sample_csv", "sample_json"])
+    def test_no_sheet_structure_rejected(self, fixture, request):
+        path = request.getfixturevalue(fixture)
+        with pytest.raises(SystemExit) as excinfo:
+            cli(["-s", "0", str(path)])
+        assert "input has no sheet structure" in str(excinfo.value)
+
+    def test_one_sheet_workbook_selectable_by_index(self, one_sheet_xlsx, capsys):
+        rc = cli(["-s", "0", str(one_sheet_xlsx)])
+        assert rc == 0
+        assert "Alice" in capsys.readouterr().out
+
+    def test_one_sheet_workbook_selectable_by_title(self, one_sheet_xlsx, capsys):
+        rc = cli(["-s", "people", str(one_sheet_xlsx)])
+        assert rc == 0
+        assert "Alice" in capsys.readouterr().out
+
+    # cli level: rendering
+
+    def test_multi_select_print_layout(self, multi_sheet_json, capsys):
+        rc = cli(["-s", "0,2", str(multi_sheet_json)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        headings = [ln for ln in out.splitlines() if ln.startswith("=== ")]
+        assert headings == ["=== people (2 rows) ===", "=== products (1 rows) ==="]
+        assert "cities" not in out
+        # exactly one blank line between sheets, none after the last
+        assert "\n\n=== products (1 rows) ===\n" in out
+        assert out.endswith("\n")
+        assert not out.endswith("\n\n")
+
+    def test_selection_order_preserved(self, multi_sheet_json, capsys):
+        rc = cli(["-s", "2,0", str(multi_sheet_json)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert out.index("=== products") < out.index("=== people")
+
+    def test_duplicates_deduped(self, multi_sheet_json, capsys):
+        rc = cli(["-s", "0,1,0", str(multi_sheet_json)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        headings = [ln for ln in out.splitlines() if ln.startswith("=== ")]
+        assert headings == ["=== people (2 rows) ===", "=== cities (2 rows) ==="]
+
+    def test_dedup_to_single_renders_plain(self, multi_sheet_json, capsys):
+        rc = cli(["-s", "0,0", str(multi_sheet_json)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "===" not in out
+        assert "Alice" in out
+
+    def test_repeat_flag_mixes_title_and_index(self, multi_sheet_json, capsys):
+        rc = cli(["-s", "people", "-s", "1", str(multi_sheet_json)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        headings = [ln for ln in out.splitlines() if ln.startswith("=== ")]
+        assert headings == ["=== people (2 rows) ===", "=== cities (2 rows) ==="]
+
+    def test_single_select_save(self, multi_sheet_xlsx, tmp_path):
+        out_file = tmp_path / "cities.csv"
+        rc = cli(["-s", "cities", "-o", str(out_file), str(multi_sheet_xlsx)])
+        assert rc == 0
+        assert "Stockholm" in out_file.read_text()
+
+    def test_single_select_export(self, multi_sheet_xlsx, capsys):
+        rc = cli(["-s", "0", "-t", "json", str(multi_sheet_xlsx)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        rows = json.loads(out)
+        assert rows[0]["name"] == "Alice"
+
+    def test_multi_select_export_json(self, multi_sheet_json, capsys):
+        rc = cli(["-s", "0,1", "-t", "json", str(multi_sheet_json)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        book = json.loads(out)
+        assert [sheet["title"] for sheet in book] == ["people", "cities"]
+
+    def test_multi_select_save_roundtrip(self, multi_sheet_json, tmp_path):
+        out_file = tmp_path / "subset.xlsx"
+        rc = cli(["-s", "2,0", "-o", str(out_file), str(multi_sheet_json)])
+        assert rc == 0
+        loaded = tablib.Databook().load(out_file.read_bytes(), format="xlsx")
+        assert [s.title for s in loaded.sheets()] == ["products", "people"]
+
+    def test_multi_select_save_unsupported_hints_sheet(
+        self, multi_sheet_json, tmp_path
+    ):
+        out_file = tmp_path / "subset.csv"
+        with pytest.raises(SystemExit) as excinfo:
+            cli(["-s", "0,1", "-o", str(out_file), str(multi_sheet_json)])
+        msg = str(excinfo.value)
+        assert "does not support multi-sheet output" in msg
+        assert "pick one sheet with --sheet" in msg
+
+    def test_multi_select_export_unsupported_hints_sheet(self, multi_sheet_json):
+        with pytest.raises(SystemExit) as excinfo:
+            cli(["-s", "0,1", "-t", "csv", str(multi_sheet_json)])
+        msg = str(excinfo.value)
+        assert "does not support multi-sheet output" in msg
+        assert "pick one sheet with --sheet" in msg
+
+    def test_tablefmt_applies_to_multi_print(self, multi_sheet_json, capsys):
+        rc = cli(["-s", "0,1", "--tablefmt", "grid", str(multi_sheet_json)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "+" in out
+
+    def test_tablefmt_applies_to_single_print(self, sample_csv, capsys):
+        rc = cli(["--tablefmt", "grid", str(sample_csv)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "+---" in out
+
+
+# --- --all-sheets ---
+
+
+class TestAllSheets:
+    def test_print_all(self, multi_sheet_xlsx, capsys):
+        rc = cli(["--all-sheets", str(multi_sheet_xlsx)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        headings = [ln for ln in out.splitlines() if ln.startswith("=== ")]
+        assert headings == ["=== people (2 rows) ===", "=== cities (2 rows) ==="]
+
+    def test_save_roundtrip(self, multi_sheet_xlsx, tmp_path):
+        out_file = tmp_path / "all.xlsx"
+        rc = cli(["--all-sheets", "-o", str(out_file), str(multi_sheet_xlsx)])
+        assert rc == 0
+        loaded = tablib.Databook().load(out_file.read_bytes(), format="xlsx")
+        assert loaded.size == 2
+
+    def test_save_unsupported_hints_sheet(self, multi_sheet_xlsx, tmp_path):
+        out_file = tmp_path / "all.csv"
+        with pytest.raises(SystemExit) as excinfo:
+            cli(["--all-sheets", "-o", str(out_file), str(multi_sheet_xlsx)])
+        msg = str(excinfo.value)
+        assert "does not support multi-sheet output" in msg
+        assert "pick one sheet with --sheet" in msg
+
+    def test_export_json(self, multi_sheet_xlsx, capsys):
+        rc = cli(["--all-sheets", "-t", "json", str(multi_sheet_xlsx)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        book = json.loads(out)
+        assert [sheet["title"] for sheet in book] == ["people", "cities"]
+
+    def test_identity_on_csv_print(self, sample_csv, capsys):
+        rc = cli(["--all-sheets", str(sample_csv)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "===" not in out
+        assert "Alice" in out
+
+    def test_identity_on_csv_export(self, sample_csv, capsys):
+        rc = cli(["--all-sheets", "-t", "json", str(sample_csv)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        rows = json.loads(out)
+        assert rows[0]["name"] == "Alice"
+
+    def test_one_sheet_workbook_single_render(self, one_sheet_xlsx, capsys):
+        rc = cli(["--all-sheets", str(one_sheet_xlsx)])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "===" not in out
+        assert "Alice" in out
+
+    def test_empty_workbook_errors(self, empty_workbook):
+        with pytest.raises(SystemExit) as excinfo:
+            cli(["--all-sheets", str(empty_workbook)])
+        assert "workbook has no sheets" in str(excinfo.value)
+
+    def test_combined_with_list_sheets_rejected(self, multi_sheet_xlsx):
+        with pytest.raises(SystemExit):
+            parse_command_line(["--all-sheets", "--list-sheets", str(multi_sheet_xlsx)])
+
+    def test_combined_with_list_formats_rejected(self):
+        with pytest.raises(SystemExit):
+            parse_command_line(["--all-sheets", "--list-formats"])
+
+    def test_stdin_rejected(self):
+        with pytest.raises(SystemExit):
+            parse_command_line(["--all-sheets", "-"])
+
+    def test_multiple_inputs_rejected(self, sample_csv, sample_json, tmp_path):
+        out = tmp_path / "out.xlsx"
+        with pytest.raises(SystemExit):
+            parse_command_line(
+                ["--all-sheets", "-o", str(out), str(sample_csv), str(sample_json)]
+            )

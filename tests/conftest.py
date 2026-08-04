@@ -6,6 +6,13 @@ import pytest
 import tablib
 
 
+def _write_json_book(path, sheets):
+    """Write a JSON multi-sheet workbook: [(title, [row_dict, ...]), ...]."""
+    book = [{"title": title, "data": rows} for title, rows in sheets]
+    path.write_text(json.dumps(book))
+    return path
+
+
 @pytest.fixture
 def sample_data():
     """A small Tablib Dataset for testing."""
@@ -93,3 +100,68 @@ def multi_sheet_xlsx(tmp_path):
     p = tmp_path / "book.xlsx"
     p.write_bytes(book.export("xlsx"))
     return p
+
+
+@pytest.fixture
+def multi_sheet_json(tmp_path):
+    """Write a three-sheet JSON workbook and return its path."""
+    return _write_json_book(
+        tmp_path / "book.json",
+        [
+            ("people", [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]),
+            (
+                "cities",
+                [
+                    {"city": "Stockholm", "population": 975551},
+                    {"city": "Gothenburg", "population": 583056},
+                ],
+            ),
+            ("products", [{"product": "Chair", "price": 499}]),
+        ],
+    )
+
+
+@pytest.fixture
+def dup_title_json(tmp_path):
+    """Write a JSON workbook with two sheets both titled "Users"."""
+    return _write_json_book(
+        tmp_path / "dup.json",
+        [
+            ("Users", [{"name": "Alice"}]),
+            ("Costs", [{"item": "Rent"}]),
+            ("Users", [{"name": "Bob"}]),
+        ],
+    )
+
+
+@pytest.fixture
+def case_dup_json(tmp_path):
+    """Write a JSON workbook whose sheet titles differ only by case."""
+    return _write_json_book(
+        tmp_path / "case.json",
+        [
+            ("users", [{"name": "Alice"}]),
+            ("USERS", [{"name": "Bob"}]),
+        ],
+    )
+
+
+@pytest.fixture
+def year_title_json(tmp_path):
+    """Write a JSON workbook with a single sheet titled "2024"."""
+    return _write_json_book(
+        tmp_path / "budget.json",
+        [("2024", [{"month": "Jan", "total": 100}])],
+    )
+
+
+@pytest.fixture
+def empty_title_json(tmp_path):
+    """Write a JSON workbook with an empty-titled sheet and a named one."""
+    return _write_json_book(
+        tmp_path / "untitled.json",
+        [
+            ("", [{"name": "Alice"}]),
+            ("named", [{"name": "Bob"}]),
+        ],
+    )

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Added
+
+* `-s/--sheet SEL`: select sheet(s) from a multi-sheet input by 0-based index
+  or title. `-s 0,2` picks an index list, repeating `-s` picks several titles,
+  and `name:2024` forces a title match for numeric-looking titles. One selected
+  sheet behaves exactly like a single-sheet input (print, `-o`, `-t`); several
+  selected sheets print with `=== title (N rows) ===` headings, save with `-o`,
+  or export with `-t` wherever the output format supports multi-sheet output
+  (otherwise the error suggests picking one sheet). Example:
+  `tublub -s Users -s 2 book.xlsx`
+* `--all-sheets`: select every sheet of a multi-sheet input; on an input
+  without sheet structure it changes nothing. Example:
+  `tublub --all-sheets -o out.json book.xlsx`
+
 ### Changed
 
 * **Breaking:** `-l` now lists the *sheets* in an input file (was
@@ -27,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 * Error messages and `--help` text no longer mention Tablib's internal
   `Databook` type; they say "multi-sheet" instead (e.g. "Format 'csv' does
   not support multi-sheet output").
+* `--tablefmt` now also styles the table printed to stdout by default;
+  previously it only had effect together with `-t cli`.
 
 ## [0.5.0] - 2026-05-29
 
