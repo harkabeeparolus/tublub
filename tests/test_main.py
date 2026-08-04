@@ -1158,3 +1158,68 @@ class TestAllSheets:
             parse_command_line(
                 ["--all-sheets", "-o", str(out), str(sample_csv), str(sample_json)]
             )
+
+
+# --- terminal print rendering ---
+
+
+def _without_cli_format(monkeypatch):
+    """Simulate an install where tablib has no "cli" format registered."""
+    formats = tuple(f for f in get_formats() if f != "cli")
+    monkeypatch.setattr("tublub.main.get_formats", lambda: formats)
+
+
+class TestPrintRendering:
+    def test_default_print_matches_t_cli(self, sample_csv, capsys):
+        cli([str(sample_csv)])
+        printed = capsys.readouterr().out
+        cli(["-t", "cli", str(sample_csv)])
+        exported = capsys.readouterr().out
+        assert printed == exported
+
+    def test_default_print_matches_t_cli_with_tablefmt(self, sample_csv, capsys):
+        cli(["--tablefmt", "grid", str(sample_csv)])
+        printed = capsys.readouterr().out
+        cli(["--tablefmt", "grid", "-t", "cli", str(sample_csv)])
+        exported = capsys.readouterr().out
+        assert printed == exported
+        assert "+---" in printed
+
+    def test_default_style_is_tabulate_plain(self, sample_csv, capsys):
+        """Not tablib's __str__ table: no pipe separators, no dashed rule."""
+        cli([str(sample_csv)])
+        out = capsys.readouterr().out
+        assert "Alice" in out
+        assert "|" not in out
+        assert "---" not in out
+
+    @pytest.mark.parametrize("fmt", ["cli", "json"])
+    def test_text_export_to_stdout_ends_with_one_newline(self, sample_csv, capsys, fmt):
+        cli(["-t", fmt, str(sample_csv)])
+        out = capsys.readouterr().out
+        assert out.endswith("\n")
+        assert not out.endswith("\n\n")
+
+    def test_saved_file_has_no_added_newline(self, sample_csv, tmp_path):
+        """The newline is a stdout courtesy; -o writes the payload verbatim."""
+        out_file = tmp_path / "out.json"
+        cli(["-o", str(out_file), str(sample_csv)])
+        assert not out_file.read_text().endswith("\n")
+
+    def test_falls_back_to_builtin_table_without_cli_format(
+        self, sample_csv, capsys, monkeypatch
+    ):
+        _without_cli_format(monkeypatch)
+        cli([str(sample_csv)])
+        out = capsys.readouterr().out
+        assert "Alice" in out
+        assert "|" in out  # tablib's own __str__ joins columns with pipes
+
+    def test_multi_sheet_print_falls_back_too(
+        self, multi_sheet_xlsx, capsys, monkeypatch
+    ):
+        _without_cli_format(monkeypatch)
+        cli(["--all-sheets", str(multi_sheet_xlsx)])
+        out = capsys.readouterr().out
+        assert "=== people (2 rows) ===" in out
+        assert "|" in out

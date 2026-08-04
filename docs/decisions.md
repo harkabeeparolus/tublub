@@ -557,3 +557,54 @@ the fallback needs a distinct failure signal (e.g. a `TublubError`
 subclass) so it never swallows unrelated errors. This supersedes the
 conversion-warning clause of the 2026-07-04 TODO 5 spec; the advice-line
 clause stands. (Recorded at the TODO 4 plan review.)
+
+---
+
+### 022. Terminal print is the `cli` export; `__str__` is the fallback
+*2026-08-04 · Accepted*
+
+**Context.** `tublub data.csv` and `tublub -t cli data.csv` rendered
+differently: the print path used tablib's hand-rolled `Dataset.__str__`
+(pipe-joined columns, dashed header rule) while `-t cli` used tablib's cli
+format (a Tabulate wrapper). TODO 4's `_format_dataset_as_table` routed
+through the cli export *only* when `--tablefmt` was given, so the flag
+switched renderer rather than style — surprising, since nothing in the CLI
+suggests two table engines exist.
+
+**Decision.**
+- The default terminal print path renders through the same `cli` export as
+  `-t cli`, for single sheets and for each sheet of a multi-sheet print.
+  The two invocations are byte-identical.
+- **No tublub-chosen default style.** We pass no `tablefmt` of our own, so
+  tablib's `CLIFormat.DEFAULT_FMT` (Tabulate's `plain`) applies and
+  `--tablefmt` is a pure style knob. Choosing our own default would mean
+  owning a style opinion, and re-deciding it whenever the upstream default
+  moves.
+- **`str(dataset)` stays as a fallback**, used when `"cli" not in
+  get_formats()`. Tablib registers the cli format only when `tabulate` is
+  importable, so the registry lookup is runtime-observed capability, not a
+  static table (008-safe). The fallback covers the default print path only;
+  an explicit `-t cli` still fails loud in `_check_known_format`, because a
+  format the user named by hand should not silently become another one.
+- Text exports to stdout are newline-terminated (`export_dataset` /
+  `export_databook`, only when the handle was defaulted). Without this,
+  `-t cli` could never equal a `print()`-based path, and every text export
+  left the shell prompt mid-line. Explicitly passed handles — every `-o`
+  save — are written verbatim, so file bytes do not change.
+
+**Why.** "The table I see by default is the table `--tablefmt` restyles" is
+what users assume, and one renderer means one thing to document, test, and
+reason about. Deferring the style to tablib/tabulate keeps tublub a thin
+wrapper (000): we express *which* renderer, not *how* it should look. The
+fallback costs three lines and keeps a `tablib` install without the `cli`
+extra usable for its most basic operation instead of tracebacking.
+
+Defaulting happens at **render time, not parse time**: we considered making
+`args.out_format` default to `"cli"` when neither `-o` nor `-t` is given,
+which would unify the paths even more aggressively. Rejected — bare print
+and `-t cli` must stay *distinguishable internally* even though they render
+alike: TODO 5's advice-vs-data-loss split (021) branches on "is this a
+conversion or a terminal print", and `--list-sheets` validation rejects a
+combined `-t`, which a phantom default would trip. The user-visible result
+is the same either way, so we take the version that keeps the explicitness
+signal. Breaking only in appearance; CHANGELOG `[Unreleased]`.

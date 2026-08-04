@@ -41,8 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 * Error messages and `--help` text no longer mention Tablib's internal
   `Databook` type; they say "multi-sheet" instead (e.g. "Format 'csv' does
   not support multi-sheet output").
-* `--tablefmt` now also styles the table printed to stdout by default;
-  previously it only had effect together with `-t cli`.
+* The table printed to the terminal by default now uses the same renderer as
+  `-t cli` (Tabulate, in its default `plain` style), so `tublub data.csv` and
+  `tublub -t cli data.csv` produce identical output. `--tablefmt` styles both;
+  previously it only had effect together with `-t cli`. Installations where the
+  `cli` format is unavailable fall back to the previous built-in table.
+* Text output written to stdout now ends with a newline, so the shell prompt no
+  longer starts on the last line of output. Files written with `-o` are
+  byte-for-byte unchanged.
 
 ## [0.5.0] - 2026-05-29
 

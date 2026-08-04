@@ -124,12 +124,14 @@ def _render_dataset(
 def _format_dataset_as_table(data: tablib.Dataset, extra_args: dict[str, Any]) -> str:
     """Format a dataset for terminal printing, honouring --tablefmt.
 
-    Without table options this is tablib's plain default table; with them,
-    the "cli" export renders the requested tabulate style.
+    Uses the same "cli" export as -t cli, so printing and converting to
+    cli render identically; the style comes from tablib/tabulate unless
+    --tablefmt asks for another one. Tablib only registers the cli format
+    when tabulate is importable, so an install without it falls back to
+    tablib's own built-in table rather than failing.
     """
-    save_args = filter_args("save", extra_args, "cli")
-    if save_args:
-        return data.export("cli", **save_args)
+    if "cli" in get_formats():
+        return data.export("cli", **filter_args("save", extra_args, "cli"))
     return str(data)
 
 
@@ -616,10 +618,12 @@ def export_databook(
 ) -> None:
     """Export a Databook to a file handle or other stream.
 
-    Mirrors export_dataset. Multi-sheet capability is discovered by
-    attempting the export, never from a static table; hint is appended
-    to the unsupported-format error message when given.
+    Mirrors export_dataset, including its stdout newline handling.
+    Multi-sheet capability is discovered by attempting the export, never
+    from a static table; hint is appended to the unsupported-format error
+    message when given.
     """
+    to_stdout = file_handle is None
     if file_handle is None:
         file_handle = _default_export_handle(target_format)
     extra_save_args = filter_args("save", extra_args, target_format)
@@ -630,6 +634,8 @@ def export_databook(
         if hint:
             msg += f"; {hint}"
         raise TublubError(msg) from exc
+    if to_stdout and isinstance(output, str) and output and output[-1] != "\n":
+        output += "\n"
     file_handle.write(output)
 
 
@@ -683,11 +689,19 @@ def export_dataset(
     extra_args: dict[str, Any],
     file_handle: IO[str] | IO[bytes] | None = None,
 ) -> None:
-    """Export dataset to a file handle or other stream."""
+    """Export dataset to a file handle or other stream.
+
+    With no file_handle the export goes to stdout, where text output is
+    newline-terminated so the shell prompt starts on its own line. Handles
+    passed by the caller (the -o file paths) are written verbatim.
+    """
+    to_stdout = file_handle is None
     if file_handle is None:
         file_handle = _default_export_handle(target_format)
     extra_save_args = filter_args("save", extra_args, target_format)
     output = data.export(target_format, **extra_save_args)
+    if to_stdout and isinstance(output, str) and output and output[-1] != "\n":
+        output += "\n"
     file_handle.write(output)
 
 
