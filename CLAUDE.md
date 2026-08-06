@@ -110,18 +110,28 @@ Not every departure needs a decision entry: a roadmap sub-task that turns out un
 - Don't monkeypatch `sys` globals — the IO edges take injection params (decision 020):
   `parse_command_line(argv, stdin_isatty=True/False)` for input-presence/implicit-stdin
   paths, `stdin=io.BytesIO(...)` for the stdin loaders, `stdout=` for
-  `_default_export_handle`.
+  `_default_export_handle`, `cli(prompt_input=io.StringIO("y\n"))` for the
+  overwrite answer. Gate on the injected *bool*, never `stream.isatty()` — an
+  injected `StringIO`/`BytesIO` always reports False, which would make the TTY
+  path untestable.
 - Decision 020's ban covers `sys` globals only — `monkeypatch.setattr("tublub.main.get_formats", ...)`
   is fine (used to simulate a Tablib install without the `cli` format).
 - Byte-exact output checks: `diff <(uv run tublub a.csv) <(uv run tublub -t cli a.csv)`
   for render identity; `uv run tublub -t json a.csv | xxd | tail -1` for trailing newlines.
 - Rejection tests use `pytest.raises(SystemExit)` since `parser.error()` exits.
+  For a combo involving a *new* flag, also assert the message
+  (`"Can not combine" in capsys.readouterr().err`) — unrecognized arguments
+  exit 2 too, so a bare `SystemExit` test is already green before you implement.
 - Tests are module-level `def test_` functions grouped under `# --- section ---`
   comments (bare `# text` comments mark sub-groups within a section); no
   `Test*` classes, no `unittest.TestCase`.
 - Smoke-testing TTY-gated output needs a real terminal:
   `script -qec "uv run tublub FILE >/dev/null" /dev/null`. The Bash tool runs
-  `/bin/bash`, not the user's fish — use `<(...)`, not `psub`.
+  `/bin/bash`, not the user's fish — use `<(...)`, not `psub`. For TTY-gated
+  *input* (the overwrite prompt), feed the answer through `script`'s own stdin:
+  `script -qec "uv run tublub a.csv existing.json" /dev/null <<< "y"`. Piping
+  into `script` instead (`echo y | script -qec ...`) replaces the pty on stdin,
+  so `isatty()` is False and the gate never opens.
 - Test CSV fixtures need 2+ columns: `detect_format` returns `None` on a
   single-column CSV, so it falls through to the TSV heuristic and every load
   prints "Extension suggests csv but content detected as tsv".

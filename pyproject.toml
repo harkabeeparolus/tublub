@@ -28,6 +28,7 @@ tublub = "tublub.main:cli"
 dev = [
     "mypy>=1",
     "pytest>=6",
+    "ruff>=0.16.1",
     "ty>=0.0.1a0",
     "zizmor>=1.29",
 ]
@@ -40,6 +41,7 @@ build-backend = "uv_build"
 select = ["ALL"]
 ignore = [
   "COM812",  # conflicts with ruff format
+  "CPY001",  # the LICENSE file covers it; no per-file copyright headers
   "D203",    # conflicts with D211
   "D213",    # conflicts with D212
   "FIX002",  # TODO comments are intentional

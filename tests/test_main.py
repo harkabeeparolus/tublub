@@ -1833,3 +1833,123 @@ def test_multi_sheet_print_falls_back_too(multi_sheet_xlsx, capsys, monkeypatch)
     out = capsys.readouterr().out
     assert "=== people (2 rows) ===" in out
     assert "|" in out
+
+
+# --- output clobber guard ---
+
+
+def test_clobber_flags_default_off(sample_csv):
+    args, _ = parse_command_line([str(sample_csv)])
+    assert args.yes is False
+    assert args.no_clobber is False
+
+
+@pytest.mark.parametrize(
+    ("flag", "dest"),
+    [
+        ("-y", "yes"),
+        ("--yes", "yes"),
+        ("-n", "no_clobber"),
+        ("--no-clobber", "no_clobber"),
+    ],
+)
+def test_clobber_flag_spellings(sample_csv, flag, dest):
+    args, _ = parse_command_line([flag, str(sample_csv)])
+    assert getattr(args, dest) is True
+
+
+def test_no_clobber_with_yes_rejected(sample_csv, capsys):
+    with pytest.raises(SystemExit):
+        parse_command_line(["-n", "-y", str(sample_csv)])
+    assert "Can not combine" in capsys.readouterr().err
+
+
+# refusing to overwrite
+
+
+def test_no_clobber_refuses_existing(existing_out, sample_csv):
+    with pytest.raises(SystemExit) as excinfo:
+        cli(["-n", "-o", str(existing_out), str(sample_csv)])
+    message = str(excinfo.value)
+    assert "already exists" in message
+    assert "-y" in message
+    assert existing_out.read_text() == "sentinel"
+
+
+def test_default_refuses_when_not_tty(existing_out, sample_csv, capsys):
+    """A script cannot answer a question, so it must opt in with -y."""
+    with pytest.raises(SystemExit) as excinfo:
+        cli(["-o", str(existing_out), str(sample_csv)], stdin_isatty=False)
+    assert "-y" in str(excinfo.value)
+    assert existing_out.read_text() == "sentinel"
+    assert "Overwrite?" not in capsys.readouterr().err
+
+
+def test_positional_outfile_guarded(existing_out, sample_csv):
+    """The two-positional form is the easiest way to clobber by accident."""
+    with pytest.raises(SystemExit):
+        cli([str(sample_csv), str(existing_out)], stdin_isatty=False)
+    assert existing_out.read_text() == "sentinel"
+
+
+def test_multi_input_output_guarded(existing_out, sample_csv, sample_json):
+    with pytest.raises(SystemExit):
+        cli(
+            ["-o", str(existing_out), str(sample_csv), str(sample_json)],
+            stdin_isatty=False,
+        )
+    assert existing_out.read_text() == "sentinel"
+
+
+# overwriting on purpose
+
+
+def test_yes_overwrites_existing(existing_out, sample_csv, capsys):
+    rc = cli(["-y", "-o", str(existing_out), str(sample_csv)], stdin_isatty=False)
+    assert rc == 0
+    assert "Alice" in existing_out.read_text()
+    assert "Overwrite?" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("answer", ["y\n", "Y\n", "yes\n", " y \n"])
+def test_prompt_yes_overwrites(existing_out, sample_csv, capsys, answer):
+    rc = cli(
+        ["-o", str(existing_out), str(sample_csv)],
+        stdin_isatty=True,
+        prompt_input=io.StringIO(answer),
+    )
+    assert rc == 0
+    assert "Alice" in existing_out.read_text()
+    captured = capsys.readouterr()
+    assert "Overwrite? [y/N]" in captured.err
+    assert "Overwrite?" not in captured.out
+
+
+@pytest.mark.parametrize("answer", ["n\n", "no\n", "\n", ""])
+def test_prompt_declined_refuses(existing_out, sample_csv, answer):
+    """Anything but yes keeps the file, including a bare newline and EOF."""
+    with pytest.raises(SystemExit):
+        cli(
+            ["-o", str(existing_out), str(sample_csv)],
+            stdin_isatty=True,
+            prompt_input=io.StringIO(answer),
+        )
+    assert existing_out.read_text() == "sentinel"
+
+
+# nothing to clobber
+
+
+@pytest.mark.parametrize("flags", [[], ["-y"], ["-n"]])
+def test_fresh_outfile_skips_check(sample_csv, tmp_path, flags):
+    out_file = tmp_path / "fresh.json"
+    rc = cli([*flags, "-o", str(out_file), str(sample_csv)], stdin_isatty=False)
+    assert rc == 0
+    assert "Alice" in out_file.read_text()
+
+
+@pytest.mark.parametrize("flags", [[], ["-y"], ["-n"]])
+def test_stdout_output_unaffected(sample_csv, capsys, flags):
+    rc = cli([*flags, "-t", "json", str(sample_csv)], stdin_isatty=False)
+    assert rc == 0
+    assert "Alice" in capsys.readouterr().out

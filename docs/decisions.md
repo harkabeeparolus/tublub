@@ -702,3 +702,55 @@ fixed sheet names is better served by one `-s` invocation per sheet than by
 tublub renaming everything on the chance of a collision. Supersedes TODO 6's
 title-derivation wording; 015's clamp-and-suffix rules and the note stand
 unchanged. (Recorded at the TODO 6 plan review.)
+
+---
+
+### 025. An existing output file is asked about at a terminal and refused everywhere else
+*2026-08-06 · Accepted*
+
+**Context.** Every write path overwrote its output file without asking, and the
+two-positional `[INFILE [OUTFILE]]` form made that easy to trigger by accident:
+`tublub -s 0 a.xlsx b.csv` meant as two inputs rewrote `b.csv`, because
+multi-input mode needs `-o`. `ffmpeg` is the closest analogue — it prompts by
+default and takes `-y`/`-n` to decide up front. The TODO sketch left two
+questions open: what the default should do when no one can be asked, and what a
+refusal should exit with.
+
+**Decision.**
+- **`-y/--yes` and `-n/--no-clobber`**, plain `store_true` in the output group,
+  combined rejected by `parser.error` like the other flag combos. `-y`
+  overwrites, `-n` refuses.
+- **With neither flag, an existing output file is asked about only at a
+  terminal:** the question goes to stderr because stdout may be the data
+  stream, defaults to no, and accepts `y`/`yes` case-insensitively. End of
+  input counts as no.
+- **When stdin is not a terminal, the default refuses** rather than
+  overwriting, with the same message `-n` gives.
+- **Every refusal exits non-zero** — `-n`, the non-terminal default, and a
+  declined question alike.
+- **One check in `cli()`,** after the `--list-formats` short-circuit and before
+  any dispatch, reading the single `args.outfile` that both `-o` and the
+  positional form resolve to. Never in `save_dataset_file` /
+  `save_databook_file`: those stay usable outside the CLI, and a library helper
+  must not block on stdin (003).
+- **The two new IO edges are injected, not patched** (020): `cli()` grew
+  `prompt_input` for the answer and now threads `stdin_isatty` on to
+  `parse_command_line` as well. The terminal test reads that flag rather than
+  asking the answer stream, whose `isatty()` is false whenever a test supplies
+  the answer from memory.
+- **Neither flag means anything without an output file** — printing to stdout,
+  or a path that does not exist yet, passes straight through — so both are
+  harmless no-ops there rather than a rejected combination.
+
+**Why.** Refusing on a non-terminal is the half that protects the case which
+prompted this: the accidental overwrite was done by an agent, and an agent
+harness is not a terminal, so a prompt-only guard would have protected nobody
+who needed it. It costs scripts one `-y`, which is the same bargain `ffmpeg`
+strikes, and it makes the flags rather than the terminal the load-bearing part
+of the design. Non-zero on refusal follows from what a converter is: it wrote
+nothing, so it did not do what it was asked, and exit 0 would hide a skipped
+conversion from the script that asked for it — modern GNU `cp -n` reaches the
+same conclusion after shipping the opposite. Supersedes the TODO sketch's
+implied "scripts never block" default and settles both of its open questions.
+Accepted as a breaking change: `-y` is a one-flag escape, and silently
+destroying data is the worse default to keep.

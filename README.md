@@ -45,6 +45,11 @@ of every input, so multi-sheet inputs are expanded rather than truncated.
 Sheets keep their own names, and a whole-file input is named after its file
 stem; names are only changed when two would collide.
 
+An existing output file is never overwritten silently: at a terminal tublub
+asks first, and in a script or a pipe it refuses, since nothing there can
+answer the question. Decide up front with `-y` (always overwrite) or `-n`
+(never overwrite).
+
 ## Multi-sheet input
 
 Three rules cover the whole surface:

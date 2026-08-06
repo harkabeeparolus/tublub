@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Added
+
+* `-y/--yes` and `-n/--no-clobber`: decide up front what happens when the
+  output file already exists. `-y` overwrites without asking, `-n` refuses and
+  exits non-zero. The two can not be combined. Example:
+  `tublub -y -o out.xlsx sales.csv`
+
+### Changed
+
+* **Breaking:** an existing output file is no longer overwritten silently. At a
+  terminal tublub asks first (`Overwrite? [y/N]`, question on stderr since
+  stdout may be the data stream, default no); when stdin is not a terminal —
+  scripts, pipes, automation — it refuses with an error suggesting `-y`, since
+  nothing there can answer the question. Pass `-y` for the previous behaviour.
+  This guards the `[INFILE [OUTFILE]]` form in particular, where
+  `tublub -s 0 a.xlsx b.csv` meant as two inputs used to rewrite `b.csv`.
+
 ## [0.6.0] - 2026-08-05
 
 ### Added

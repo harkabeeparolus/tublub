@@ -79,19 +79,27 @@ def cli(
     *,
     stderr_isatty: bool | None = None,
     stdin: IO[bytes] | None = None,
+    stdin_isatty: bool | None = None,
+    prompt_input: TextIO | None = None,
 ) -> int:
     """Run the command line interface (argv defaults to sys.argv).
 
-    stderr_isatty and stdin substitute the two IO edges the single-input
-    paths touch, so tests can exercise both cases without patching global
-    state; they resolve to the real sys objects deep in the call chain, so
-    nothing probes them unless it needs them.
+    stderr_isatty, stdin, stdin_isatty and prompt_input substitute the IO
+    edges the run touches: stdin carries piped data, stdin_isatty decides
+    both implicit-stdin input and whether an overwrite can be asked about,
+    and prompt_input is where that answer is read. Tests can exercise
+    either case without patching global state; each resolves to the real
+    sys object deep in the call chain, so nothing probes them unless it
+    needs them.
     """
-    args, extra_args = parse_command_line(argv)
+    args, extra_args = parse_command_line(argv, stdin_isatty=stdin_isatty)
 
     if args.list_formats:
         print("Available formats:", " ".join(get_formats()))
         return 0
+
+    _check_outfile_clobber(args, stdin_isatty=stdin_isatty, prompt_input=prompt_input)
+
     if args.list_sheets:
         return _run_list_sheets(args, extra_args, stdin=stdin)
     if args.sheets is not None or args.all_sheets:
@@ -99,6 +107,48 @@ def cli(
     if len(args.infiles) >= _MIN_DATABOOK_INPUTS:
         return _run_databook(args, extra_args)
     return _run_single(args, extra_args, stderr_isatty=stderr_isatty, stdin=stdin)
+
+
+def _check_outfile_clobber(
+    args: argparse.Namespace,
+    *,
+    stdin_isatty: bool | None = None,
+    prompt_input: TextIO | None = None,
+) -> None:
+    """Refuse, confirm, or allow overwriting an existing output file.
+
+    Output to stdout or to a path that does not exist yet passes straight
+    through, which makes -y and -n harmless no-ops there. On an existing
+    path -y overwrites without asking and -n refuses outright; with
+    neither, a terminal gets the question on stderr (stdout may be the
+    data stream) defaulting to No, and a non-terminal stdin refuses the
+    same way -n does — a script or agent cannot answer a question, so it
+    has to opt in with -y. The terminal test reads the stdin_isatty flag
+    rather than asking prompt_input, whose isatty() is False whenever a
+    test supplies the answer from memory.
+    """
+    if args.outfile is None or args.yes or not args.outfile.exists():
+        return
+
+    refusal = f"Output file '{args.outfile}' already exists; use -y to overwrite"
+    if args.no_clobber:
+        sys.exit(refusal)
+
+    if stdin_isatty is None:
+        stdin_isatty = sys.stdin.isatty()
+    if not stdin_isatty:
+        sys.exit(refusal)
+
+    if prompt_input is None:
+        prompt_input = sys.stdin
+    print(
+        f"Output file '{args.outfile}' already exists. Overwrite? [y/N] ",
+        end="",
+        file=sys.stderr,
+        flush=True,
+    )
+    if prompt_input.readline().strip().lower() not in {"y", "yes"}:
+        sys.exit(f"Not overwriting '{args.outfile}'")
 
 
 def _run_single(
@@ -1078,6 +1128,9 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
     if args.list_formats and (args.infiles or args.outfile):
         parser.error("Can not combine --list-formats with filename(s)")
 
+    if args.no_clobber and args.yes:
+        parser.error("Can not combine -n/--no-clobber with -y/--yes")
+
     if args.list_sheets:
         _validate_list_sheets(parser, args)
 
@@ -1211,6 +1264,19 @@ def build_argument_parser() -> argparse.ArgumentParser:
             "output file; with multiple inputs, combine them into one "
             "multi-sheet file (e.g. XLSX, ODS, JSON)"
         ),
+    )
+    output_group.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="overwrite an existing output file without asking",
+    )
+    output_group.add_argument(
+        "-n",
+        "--no-clobber",
+        dest="no_clobber",
+        action="store_true",
+        help="never overwrite an existing output file; refuse instead",
     )
     output_group.add_argument(
         "--tablefmt",

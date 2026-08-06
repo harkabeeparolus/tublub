@@ -165,3 +165,11 @@ def empty_title_json(tmp_path):
             ("named", [{"name": "Bob"}]),
         ],
     )
+
+
+@pytest.fixture
+def existing_out(tmp_path):
+    """Write a pre-existing output file with sentinel content, return its path."""
+    p = tmp_path / "out.json"
+    p.write_text("sentinel")
+    return p

@@ -18,35 +18,36 @@ because nothing else records them:
 
 ---
 
-## Don't clobber an existing output file silently
+## Don't clobber an existing output file silently — DONE
 
-Every write path overwrites without asking, and the two-positional
-`[INFILE [OUTFILE]]` form makes that easy to trigger by accident: a
-`tublub -s 0 a.xlsx b.csv` meant as "two inputs" silently rewrites `b.csv`
-(multi-input mode needs `-o`). Precedent for guarding it is `ffmpeg`, the
-closest analogue — prompts by default, `-y`/`-n` to decide up front.
-Sketch: `-n/--no-clobber` (refuse, non-zero exit) and `-y/--yes` (always
-overwrite), mutually exclusive via `parser.error` like the other combo
-rejections; both short flags are free. Default when neither is given:
-prompt, question on **stderr** (stdout may be the data stream), gated on
-`sys.stdin.isatty()`. That gate is self-enforcing — piped data means stdin
-is not a terminal, so "reading data from stdin" and "able to ask a
-question" are mutually exclusive by construction, and scripts never block.
-The check belongs in the CLI layer, not in `save_dataset_file` /
-`save_databook_file`: those stay reusable outside the CLI, and a library
-helper must never block on stdin. Per 020 the two new IO edges
-(`stdin_isatty`, and the answer read) need injection params, not
-monkeypatched `sys` globals — `parse_command_line` already takes
-`stdin_isatty`.
+Shipped (unreleased): `-y/--yes` and `-n/--no-clobber`, plus a default that
+asks at a terminal (question on stderr, default no) and refuses anywhere
+else. Decision 025 settles the two questions the sketch left open, in both
+cases against its own leaning: the non-terminal default refuses rather than
+overwriting — the accident that prompted this was an agent, and an agent is
+not a terminal, so a prompt-only guard would have caught nothing — and every
+refusal exits non-zero rather than treating "nothing to do" as success.
 
-**Worth knowing before prioritising:** the prompt half only protects
-humans. An agent harness is not a terminal (`sys.stdin.isatty()` is False
-under Claude Code's Bash tool), so the default prompt would *not* have
-caught the accidental overwrite described above — that was an agent. The
-flags are the half that works everywhere, so ship `-n` first if only one
-lands. Open question for whoever ships it: does `-n` on an existing file
-exit 0 (nothing to do) or non-zero (refused)? GNU `cp -n` exits 0; a
-converter arguably should fail loud.
+## A failed multi-sheet save leaves the output file empty
+
+`save_databook_file` opens the output for writing *before* `export_databook`
+can reject the format, so a target that cannot hold the sheets is truncated
+and then never written. Observed 2026-08-06:
+`tublub -y --all-sheets -o victim.csv book.xlsx` prints "Format 'csv' does not
+support multi-sheet output", exits 1, and leaves `victim.csv` at 0 bytes — the
+strict `--all-sheets`/multi-`-s` path (025's guard asked first, but `-y`
+authorised a *conversion*, not a wipe). The 021 fallback path survives it by
+accident: `_convert_whole_book` catches the error and `save_dataset_file`
+reopens the same path, so the file ends up holding the first sheet.
+
+Sketch: decide the format's book capability before opening anything. The
+capability check is already a per-format fact (`Databook.export` raises for
+csv/tsv/dbf/cli/jira/latex/sql at any size), and 021's fallback needs the same
+answer one frame earlier, so hoisting it serves both. Do not fix this by
+writing to a temporary file and renaming — that changes the identity of the
+output path (symlinks, hard links, permissions) for every save, not just the
+failing one. Needs its own decision entry; the 025 guard is unaffected either
+way, since it runs before any of this.
 
 ## `try_load_*` should resolve the input format once
 
