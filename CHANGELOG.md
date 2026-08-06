@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   This guards the `[INFILE [OUTFILE]]` form in particular, where
   `tublub -s 0 a.xlsx b.csv` meant as two inputs used to rewrite `b.csv`.
 
+### Fixed
+
+* A multi-sheet save to a format that can not hold several sheets no longer
+  empties the output file. `tublub --all-sheets -o out.csv book.xlsx` used to
+  truncate `out.csv` to 0 bytes before reporting that csv does not support
+  multi-sheet output; the file is now left exactly as it was, and a file that
+  did not exist is not created.
+
 ## [0.6.0] - 2026-08-05
 
 ### Added

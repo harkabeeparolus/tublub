@@ -76,7 +76,10 @@ Not every departure needs a decision entry: a roadmap sub-task that turns out un
   with `not book.sheets()`; a `if not data:` guard is dead code for Databooks.
 - `Databook.export(fmt)` raises `UnsupportedFormat` for csv/tsv/dbf/cli/jira/
   latex/sql at *any* size, size 1 included — capability is per-format, not
-  per-book. Book-capable: html/json/ods/rst/xls/xlsx/yaml.
+  per-book. Book-capable: html/json/ods/rst/xls/xlsx/yaml. Size *0* is the
+  exception: an empty book raises `IndexError` from xls/xlsx (openpyxl needs
+  one visible sheet), so capability can't be probed with a throwaway
+  `Databook()` — attempt the real export (decision 026).
 - `import_set()` on a book-shaped JSON/YAML (`[{title, data}, ...]`) silently
   yields a bogus two-column `title`/`data` Dataset — which is why the
   `try_load_*` handshake tries Databook first.

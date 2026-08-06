@@ -28,26 +28,15 @@ overwriting — the accident that prompted this was an agent, and an agent is
 not a terminal, so a prompt-only guard would have caught nothing — and every
 refusal exits non-zero rather than treating "nothing to do" as success.
 
-## A failed multi-sheet save leaves the output file empty
+## A failed multi-sheet save leaves the output file empty — DONE
 
-`save_databook_file` opens the output for writing *before* `export_databook`
-can reject the format, so a target that cannot hold the sheets is truncated
-and then never written. Observed 2026-08-06:
-`tublub -y --all-sheets -o victim.csv book.xlsx` prints "Format 'csv' does not
-support multi-sheet output", exits 1, and leaves `victim.csv` at 0 bytes — the
-strict `--all-sheets`/multi-`-s` path (025's guard asked first, but `-y`
-authorised a *conversion*, not a wipe). The 021 fallback path survives it by
-accident: `_convert_whole_book` catches the error and `save_dataset_file`
-reopens the same path, so the file ends up holding the first sheet.
-
-Sketch: decide the format's book capability before opening anything. The
-capability check is already a per-format fact (`Databook.export` raises for
-csv/tsv/dbf/cli/jira/latex/sql at any size), and 021's fallback needs the same
-answer one frame earlier, so hoisting it serves both. Do not fix this by
-writing to a temporary file and renaming — that changes the identity of the
-output path (symlinks, hard links, permissions) for every save, not just the
-failing one. Needs its own decision entry; the 025 guard is unaffected either
-way, since it runs before any of this.
+Shipped (unreleased): `save_databook_file` renders the workbook into memory
+and only then opens the output, so a format that cannot hold the sheets leaves
+the file untouched. Decision 026 supersedes the sketch's mechanism — book
+capability cannot be decided before opening, because an empty
+`Databook().export()` raises `IndexError` for xls/xlsx rather than
+`UnsupportedFormat`, so the real export has to be attempted (008) and buffered.
+The sketch's ban on temp-file-and-rename stands.
 
 ## `try_load_*` should resolve the input format once
 

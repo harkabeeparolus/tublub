@@ -628,6 +628,7 @@ def test_save_unsupported_format_raises(sample_csv, tmp_path):
     book = build_databook([sample_csv, sample_csv], extra_args={})
     with pytest.raises(TublubError, match="multi-sheet"):
         save_databook_file(book, out, extra_args={})
+    assert not out.exists()
 
 
 def test_save_databook_unknown_format_raises(sample_csv, tmp_path):
@@ -1680,6 +1681,15 @@ def test_all_sheets_still_errors_where_default_falls_back(multi_sheet_xlsx, tmp_
     with pytest.raises(SystemExit) as excinfo:
         cli(["--all-sheets", "-o", str(out_file), str(multi_sheet_xlsx)])
     assert "pick one sheet with --sheet" in str(excinfo.value)
+
+
+def test_failed_all_sheets_save_leaves_outfile_untouched(multi_sheet_xlsx, tmp_path):
+    """A save the target format refuses must not destroy the existing file."""
+    out_file = tmp_path / "out.csv"
+    out_file.write_text("sentinel")
+    with pytest.raises(SystemExit):
+        cli(["-y", "--all-sheets", "-o", str(out_file), str(multi_sheet_xlsx)])
+    assert out_file.read_text() == "sentinel"
 
 
 # degenerate inputs

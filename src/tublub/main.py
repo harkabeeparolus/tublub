@@ -7,6 +7,7 @@ either in the requested output format, or pretty-printed as a table.
 import argparse
 import csv
 import functools
+import io
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
@@ -522,6 +523,13 @@ def _open_for_format(file_name: Path, cfg: FormatConfig, *, write: bool) -> IO[A
     Binary formats open in "rb"/"wb"; everything else in "r"/"w". Only CSV
     sets a non-default newline; it is threaded through here so callers don't
     reach into cfg.open_kwargs at every open site.
+
+    write=True truncates the file the moment it is opened, before the caller
+    has written a byte. A caller whose export can still fail must therefore
+    render its payload first and open only once that succeeded, or a refused
+    conversion destroys the very file it declined to write — see
+    save_databook_file, where the format's multi-sheet capability is only
+    known once the export has been attempted.
     """
     mode = "w" if write else "r"
     if cfg.binary:
@@ -795,12 +803,19 @@ def save_databook_file(
     (the advice differs per caller: sheet selection can suggest --sheet,
     the multi-input path must not). A target that cannot hold the sheets
     raises MultiSheetUnsupportedError.
+
+    The workbook renders into memory before the output is opened, because
+    opening for writing truncates and whether the format can hold several
+    sheets is only known once the export has been attempted — otherwise a
+    refused conversion would destroy the very file it declined to write.
     """
     file_format = _resolve_output_format(force_format, file_name)
 
     cfg = FORMATS.get(file_format, _DEFAULT_FMT)
+    buffer: io.BytesIO | io.StringIO = io.BytesIO() if cfg.binary else io.StringIO()
+    export_databook(book, file_format, extra_args, file_handle=buffer, hint=hint)
     with _open_for_format(file_name, cfg, write=True) as fh:
-        export_databook(book, file_format, extra_args, file_handle=fh, hint=hint)
+        fh.write(buffer.getvalue())
 
     print(f"Saved '{file_name}', {book.size} sheets ({file_format})")
 

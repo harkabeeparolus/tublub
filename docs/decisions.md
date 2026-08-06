@@ -754,3 +754,50 @@ same conclusion after shipping the opposite. Supersedes the TODO sketch's
 implied "scripts never block" default and settles both of its open questions.
 Accepted as a breaking change: `-y` is a one-flag escape, and silently
 destroying data is the worse default to keep.
+
+---
+
+### 026. A multi-sheet save renders its payload before opening the output file
+*2026-08-06 · Accepted*
+
+**Context.** `save_databook_file` opened the output for writing — which
+truncates — and only then called `export_databook`, the attempt that discovers
+whether the target format can hold several sheets (008). So a refused
+conversion destroyed the file it declined to write:
+`tublub -y --all-sheets -o victim.csv book.xlsx` printed "Format 'csv' does not
+support multi-sheet output", exited 1, and left `victim.csv` at 0 bytes. The
+025 guard runs earlier and is unaffected — `-y` authorises a *conversion*, not
+a wipe. The 021 fallback path survived only by accident: `_convert_whole_book`
+caught the error after the truncation and `save_dataset_file` reopened the same
+path with the first sheet.
+
+**Decision.**
+- `save_databook_file` exports into an `io.BytesIO`/`io.StringIO` chosen from
+  the format's `binary` flag, then opens the real file and writes the finished
+  payload. Nothing touches the output path until the export has succeeded.
+- `export_databook` stays the single error boundary and is reused unchanged;
+  only the ordering moves. The 021 fallback now branches before the file has
+  been opened at all, so it survives by design rather than by accident.
+- **Not** a temporary file plus rename: that would change the identity of the
+  output path (symlinks, hard links, ownership, permissions) on *every* save,
+  not just the failing one.
+- `save_dataset_file` keeps writing straight to the file. Its post-open
+  failures are raw Tablib tracebacks on degenerate data (an empty sheet to dbf
+  raises `IndexError`), not a designed rejection, so there is no error to move
+  ahead of the open.
+
+**Why.** Destroying data on the path that refuses to write it is the worst
+failure a converter has: the user still has the input, but the *other* file is
+gone, and nothing in the error says so. Buffering costs one extra copy of a
+payload `book.export()` already materialises in full — Tablib has no streaming
+export, so the payload exists in memory either way.
+
+This supersedes the TODO sketch's mechanism, which proposed deciding the
+format's book capability *before* opening anything, on the grounds that
+capability is a per-format fact. It is not askable that way: an empty
+`tablib.Databook().export(fmt)` raises `IndexError` for xls and xlsx (openpyxl
+needs at least one visible sheet), not `UnsupportedFormat`, so a synthetic
+probe cannot separate "cannot hold sheets" from "cannot hold *no* sheets". A
+static table is what 008 exists to forbid. Attempting the real export and
+buffering the result answers the same question with the data actually being
+saved. The sketch's ban on temp-file-and-rename stands.
