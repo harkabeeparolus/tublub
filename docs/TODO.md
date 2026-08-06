@@ -47,23 +47,17 @@ per loaded input. Decision 027 picks this over the sketch's other option
 (short-circuiting detection under `-f`), which would have silenced 004's
 warning in exactly the wrong-extension case it exists for.
 
-## Title a single-input sheet after its input file
+## Title a single-input sheet after its input file — DONE
 
-`tublub customers.csv out.xlsx` writes a sheet named `Tablib Dataset` —
-Tablib's fallback when `Dataset.title` is `None`, which the single-input
-path never sets. Only `build_databook()` assigns titles, so
-`-o out.xlsx a.csv b.csv` names the sheets `a`/`b` while
-`-o out.xlsx a.csv` names the one sheet `Tablib Dataset`: dropping the
-second input changes how the *first* is named, the same arity surprise
-021/024 outlawed for how inputs are *read*. Sketch: in the single-input
-save/export path, title the sheet `path.stem` (through `_fit_title` for
-the 31-char cap) **only when the input had no sheet structure** — an
-observed sheet title must survive verbatim per 024, which it does today
-(a one-sheet workbook already round-trips its real title). Visible only
-in formats that carry sheet names (xlsx/ods/xls); records-shaped
-json/yaml and the single-sheet text formats are unaffected, so it is not
-a breaking output change for them. Open question for whoever ships it:
-stdin has no stem — keep Tablib's fallback, or name it `stdin`?
+Shipped (unreleased): a payload that loads with no sheet structure is titled
+after its source in `_import_any` — a file by its stem, stdin by the name
+`stdin` — while observed sheet titles stay verbatim. Decision 028 answers the
+sketch's open stdin question (`stdin`, since keeping `Tablib Dataset` keeps a
+Tablib internal inside the user's file, which 019 forbids) and supersedes its
+placement wording: titling in the single-input save/export path would have left
+`--all-sheets` on a structureless input writing the placeholder, and 017 makes
+that the identity modifier, so the load-time handshake is the only place that
+satisfies both.
 
 ## Smaller multi-sheet extensions
 

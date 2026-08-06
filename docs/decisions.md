@@ -838,3 +838,53 @@ file handle is what every stdin load has always done, and csv — the only
 format with an open rule (`newline=""`) — reads bytes-transparently; the
 per-format open table (000) still governs writes and the per-type file
 helpers.
+
+---
+
+### 028. A single input with no sheet structure is titled after its source, at load time
+*2026-08-06 · Accepted*
+
+**Context.** `tublub customers.csv out.xlsx` wrote a sheet named
+`Tablib Dataset` — Tablib's placeholder when `Dataset.title` is `None`, which
+only the ods/xls/xlsx exports substitute (the html export uses `Set {i}`, and no
+single-Dataset export renders a title at all). Titles were assigned only in
+`build_databook`, so `-o out.xlsx a.csv b.csv` named its sheets `a`/`b` while
+`-o out.xlsx a.csv` named its one sheet `Tablib Dataset`: dropping the second
+input changed how the *first* was named. The TODO sketch left one question open —
+stdin has no stem, so keep the placeholder or name it `stdin`?
+
+**Decision.**
+- **A payload that loaded as a fallback `Dataset` — no observed sheet structure —
+  is titled after its source**, clamped through `_fit_title`. A file takes its
+  stem, matching the title `build_databook` would give it. Observed sheet titles
+  are never touched.
+- **Stdin is named `stdin`.** A pipe has no stem, but `stdin` is the source name
+  the error messages already use, and it is what the multi-input rule would give
+  a source called `stdin` anyway.
+- **Titling happens at load, in `_import_any`**, the branch shared by
+  `try_load_file` and `try_load_stdin`, rather than in the single-input
+  save/export path the sketch named. One place titles and clamps; both callers
+  must say what their source is called.
+- **No disambiguation note.** A single sheet cannot collide with anything, so the
+  stderr note stays `_unique_titles`' concern.
+
+**Why.** This is 021's arity rule — adding or removing a second input must not
+change how the first is read — applied to how it is *named*, which is exactly
+what 024 established for the multi-input side. 019 supplies the second argument:
+`Tablib Dataset` ships a Tablib internal *inside the user's file*, the same leak
+019 removed from messages and help text, and it is the one place a user cannot
+avoid reading it.
+
+Load-time placement is what the sketch's own reasoning requires, not a
+convenience. 017 makes `--all-sheets` the identity modifier on a structureless
+input, so titling only in the single-input path would have left
+`--all-sheets -o out.xlsx a.csv` writing `Tablib Dataset` where
+`a.csv out.xlsx` wrote `a` — a new arity surprise in place of the one being
+fixed. The same move 023 made for stdin loading: put the behaviour where every
+path that should share it already passes. Placement is also observationally free:
+no print or export path renders a Dataset's title except the three formats this
+entry is about.
+
+Not a breaking output change for records-shaped json/yaml or the single-sheet
+text formats — none of them carries a sheet name. Supersedes the sketch's
+save/export placement wording and settles its open stdin question.

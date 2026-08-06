@@ -9,6 +9,7 @@ import tablib
 
 from tublub.main import (
     FORMATS,
+    XLSX_TITLE_LIMIT,
     MultiSheetUnsupportedError,
     TublubError,
     _default_export_handle,
@@ -1974,3 +1975,51 @@ def test_stdout_output_unaffected(sample_csv, capsys, flags):
     rc = cli([*flags, "-t", "json", str(sample_csv)], stdin_isatty=False)
     assert rc == 0
     assert "Alice" in capsys.readouterr().out
+
+
+# --- single-input sheet titling ---
+
+
+def _saved_titles(out_file):
+    """Reload a saved XLSX workbook and return its sheet titles."""
+    book = tablib.Databook().load(out_file.read_bytes(), format="xlsx")
+    return [sheet.title for sheet in book.sheets()]
+
+
+def test_single_file_sheet_named_after_stem(sample_csv, tmp_path):
+    out_file = tmp_path / "out.xlsx"
+    rc = cli([str(sample_csv), str(out_file)])
+    assert rc == 0
+    assert _saved_titles(out_file) == ["data"]
+
+
+def test_stdin_sheet_named_stdin(tmp_path):
+    out_file = tmp_path / "out.xlsx"
+    rc = cli(["-", str(out_file)], stdin=io.BytesIO(b"name,age\nAlice,30\n"))
+    assert rc == 0
+    assert _saved_titles(out_file) == ["stdin"]
+
+
+def test_long_stem_clamped_to_limit(tmp_path):
+    long_input = tmp_path / f"{'x' * 40}.csv"
+    long_input.write_text("name,age\nAlice,30\n")
+    out_file = tmp_path / "out.xlsx"
+    rc = cli([str(long_input), str(out_file)])
+    assert rc == 0
+    assert _saved_titles(out_file) == ["x" * XLSX_TITLE_LIMIT]
+
+
+def test_observed_sheet_title_survives(one_sheet_xlsx, tmp_path):
+    """A one-sheet workbook keeps its own title; only structureless input is named."""
+    out_file = tmp_path / "out.xlsx"
+    rc = cli([str(one_sheet_xlsx), str(out_file)])
+    assert rc == 0
+    assert _saved_titles(out_file) == ["people"]
+
+
+def test_all_sheets_titles_structureless_input_too(sample_csv, tmp_path):
+    """--all-sheets is the identity modifier here, so the naming must match."""
+    out_file = tmp_path / "out.xlsx"
+    rc = cli(["--all-sheets", "-o", str(out_file), str(sample_csv)])
+    assert rc == 0
+    assert _saved_titles(out_file) == ["data"]

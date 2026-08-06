@@ -687,11 +687,12 @@ def try_load_file(
     callers don't reimplement it. Reads and detects once and tries both
     interpretations on the same payload, like try_load_stdin, so a
     wrong-extension file warns about the mismatch once, not once per
-    attempted shape.
+    attempted shape. A file with no sheet structure is named after its
+    stem, the same title the multi-input path would give it.
     """
     raw = file_name.read_bytes()
     fmt = _resolve_input_format(file_name, in_format, raw)
-    return _import_any(raw, fmt, filter_args("load", extra_args, fmt))
+    return _import_any(raw, fmt, filter_args("load", extra_args, fmt), file_name.stem)
 
 
 def try_load_stdin(
@@ -705,24 +706,35 @@ def try_load_stdin(
     Reads stdin once and tries both interpretations on the same bytes,
     so callers don't need to choose load_databook_stdin vs
     load_dataset_stdin up front (stdin can only be consumed once).
+    Piped data with no sheet structure is named "stdin" — a pipe has no
+    file stem, but that is the source name every message already uses.
     """
     raw, fmt, extra_load_args = _read_and_detect_stdin(in_format, extra_args, stdin)
-    return _import_any(raw, fmt, extra_load_args)
+    return _import_any(raw, fmt, extra_load_args, "stdin")
 
 
 def _import_any(
-    raw: bytes, fmt: str, extra_load_args: dict[str, Any]
+    raw: bytes, fmt: str, extra_load_args: dict[str, Any], title: str
 ) -> tablib.Databook | tablib.Dataset:
     """Import one payload as a Databook when possible, else a Dataset.
 
     See load_databook_file for the catch policy; genuine load errors
     propagate.
+
+    A payload with no sheet structure is titled after its source, so
+    saving it to a format that carries sheet names writes that name
+    instead of Tablib's "Tablib Dataset" placeholder — and writes the
+    same name whether or not a second input is present. Sheets that came
+    with titles of their own are left alone; the title is clamped like
+    any other because the same 31-char cap applies.
     """
     data = raw if is_bin(fmt) else raw.decode()
     try:
         return tablib.Databook().load(data, format=fmt, **extra_load_args)
     except (tablib.UnsupportedFormat, KeyError, TypeError):
-        return tablib.import_set(data, format=fmt, **extra_load_args)
+        dataset = tablib.import_set(data, format=fmt, **extra_load_args)
+        dataset.title = _fit_title(title)
+        return dataset
 
 
 def _read_and_detect_stdin(

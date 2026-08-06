@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   nothing there can answer the question. Pass `-y` for the previous behaviour.
   This guards the `[INFILE [OUTFILE]]` form in particular, where
   `tublub -s 0 a.xlsx b.csv` meant as two inputs used to rewrite `b.csv`.
+* Converting a single input that has no sheet structure to a format that carries
+  sheet names (XLSX, ODS, XLS) now names the sheet after the input instead of
+  `Tablib Dataset`: `tublub customers.csv out.xlsx` writes a sheet named
+  `customers`, and piped input writes one named `stdin`. This is the name
+  multi-input mode already gave it, so adding or dropping a second input no
+  longer changes what the first one's sheet is called. Sheet names that came
+  with the input are still kept verbatim.
 
 ### Fixed
 

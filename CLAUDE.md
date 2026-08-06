@@ -105,9 +105,13 @@ Not every departure needs a decision entry: a roadmap sub-task that turns out un
   with `git stash push src/tublub/main.py` (pathspec form — a bare `git stash`
   would take the new tests too) then `git stash pop`: un-applying your own diff
   is the most faithful mutation and `pop` restores it byte-exactly. Only for
-  *committed* code does hand-mutating apply; revert that with Edit. `git checkout`
-  / `git restore <file>` on a file holding uncommitted work discards it — and
-  stash cannot get it back afterwards, it only prevents the loss.
+  *committed* code does hand-mutating apply, and the same stash brackets it:
+  `git stash push src/tublub/main.py` to park your work, mutate, watch it go red,
+  then `git restore src/tublub/main.py` to drop only the mutation and
+  `git stash pop` to bring your work back. Don't revert the mutation with Edit —
+  restore is exact and cannot leave a stray edit behind. `git checkout` /
+  `git restore <file>` on a file holding *unstashed* work discards it — and stash
+  cannot get it back afterwards, it only prevents the loss.
 - Argparse unit tests: call `parse_command_line(argv)` directly and assert on the returned `args`.
 - CLI integration tests: call `cli([...])` with an argv list, read `capsys.readouterr().out`.
 - Don't monkeypatch `sys` globals — the IO edges take injection params (decision 020):
