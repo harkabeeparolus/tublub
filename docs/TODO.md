@@ -38,19 +38,14 @@ capability cannot be decided before opening, because an empty
 `UnsupportedFormat`, so the real export has to be attempted (008) and buffered.
 The sketch's ban on temp-file-and-rename stands.
 
-## `try_load_*` should resolve the input format once
+## `try_load_*` should resolve the input format once — DONE
 
-`try_load_file()` calls `load_databook_file()` then `load_dataset_file()`,
-and each calls `_resolve_input_format()`, which re-reads the file to detect
-and prints the "Extension suggests X but content detected as Y" warning
-unconditionally. So a CSV named `data.xls` (decision 004's own example)
-prints that warning **twice** and is read four times. Pre-existing, but the
-0.6.0 whole-book default moved it from the rare `-l`/`-s` paths onto the
-common default path. Both clean fixes change *when* the warning fires —
-short-circuit `_resolve_input_format` when `-f` is given, or have
-`try_load_*` read and detect once and pass the bytes down — so this needs
-its own decision entry. No test currently asserts the double warning; don't
-add one.
+Shipped (unreleased): `try_load_file` reads the file once, resolves the
+format once, and tries both shapes on the same payload through the same
+handshake helper as `try_load_stdin`, so the mismatch warning fires once
+per loaded input. Decision 027 picks this over the sketch's other option
+(short-circuiting detection under `-f`), which would have silenced 004's
+warning in exactly the wrong-extension case it exists for.
 
 ## Title a single-input sheet after its input file
 

@@ -752,6 +752,17 @@ def test_tablib_hostile_json_shape_propagates(tmp_path):
         try_load_file(bad, extra_args={})
 
 
+def test_wrong_extension_warns_once(tmp_path, capsys):
+    """A wrong-extension input warns about the extension/content mismatch
+    once, not once per attempted shape."""
+    p = tmp_path / "data.xls"
+    p.write_text("name,age\nAlice,30\nBob,25\n")
+    loaded = try_load_file(p, extra_args={})
+    assert isinstance(loaded, tablib.Dataset)
+    err = capsys.readouterr().err
+    assert err.count("Extension suggests xls but content detected as csv") == 1
+
+
 # --- load_databook_stdin ---
 
 

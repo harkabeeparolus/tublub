@@ -801,3 +801,40 @@ probe cannot separate "cannot hold sheets" from "cannot hold *no* sheets". A
 static table is what 008 exists to forbid. Attempting the real export and
 buffering the result answers the same question with the data actually being
 saved. The sketch's ban on temp-file-and-rename stands.
+
+---
+
+### 027. `try_load_file` reads and detects once, like the stdin path
+*2026-08-06 · Accepted*
+
+**Context.** `try_load_file` called `load_databook_file` and then, on the
+Dataset fallback, `load_dataset_file` — and each resolved the input format
+for itself, with `_resolve_input_format` re-reading the file for detection
+and printing the extension/content mismatch warning unconditionally. A CSV
+named `data.xls` (004's own example) warned twice and was read four times.
+Pre-existing, but the 0.6.0 whole-book default (021, 023) moved it from the
+rare selection paths onto the default path. The TODO entry named two clean
+fixes, each changing when the warning fires: short-circuit
+`_resolve_input_format` when `-f` is given, or read and detect once in
+`try_load_file` and pass the payload down.
+
+**Decision.** `try_load_file` reads the file's bytes once, resolves the
+format once (`_resolve_input_format` accepts already-read bytes; the
+read-and-detect `detect_format_from_file` wrapper is gone), and tries the
+Databook interpretation with Dataset fallback on that same payload via
+`_import_any`, a helper shared with `try_load_stdin`. The mismatch warning
+now fires once per loaded input — still including under `-f`, as before.
+The per-type helpers `load_databook_file` / `load_dataset_file` keep their
+own resolution and per-format open path, like their stdin twins.
+
+**Why.** This is the shape 011 already required of stdin ("try both
+interpretations on one read"), so files and stdin now load identically;
+that a file *can* be re-read was the only reason it ever took the lazier
+shape. The `-f` short-circuit was rejected because it would silence 004's
+reconfirmed warn-and-continue policy in exactly the wrong-extension case
+that policy exists for, while still reading the payload more than once
+without `-f`. Handing Tablib decoded bytes instead of a newline-configured
+file handle is what every stdin load has always done, and csv — the only
+format with an open rule (`newline=""`) — reads bytes-transparently; the
+per-format open table (000) still governs writes and the per-type file
+helpers.

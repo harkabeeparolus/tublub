@@ -583,7 +583,9 @@ def load_databook_file(
         return None
 
 
-def _resolve_input_format(file_name: Path, in_format: str | None) -> str:
+def _resolve_input_format(
+    file_name: Path, in_format: str | None, raw: bytes | None = None
+) -> str:
     """Resolve a file's input format and warn on extension/content mismatch.
 
     Priority: explicit -f flag > content detection > extension.
@@ -592,8 +594,13 @@ def _resolve_input_format(file_name: Path, in_format: str | None) -> str:
     because tablib's detect_format() relies on csv.Sniffer, which fails on
     single-column CSV/TSV (no delimiter to sniff). The -f flag is the escape
     hatch for when both fail (e.g. single-column CSV with a .txt extension).
+
+    raw supplies already-read file content so a caller holding the bytes
+    doesn't pay a second read; when omitted the file is read here.
     """
-    detected = detect_format_from_file(file_name)
+    if raw is None:
+        raw = file_name.read_bytes()
+    detected = _detect_format_from_bytes(raw)
     guessed = guess_file_format(file_name)
 
     if guessed and detected and guessed != detected:
@@ -607,13 +614,6 @@ def _resolve_input_format(file_name: Path, in_format: str | None) -> str:
         msg = f"Unable to detect format for: {file_name}"
         raise TublubError(msg)
     return fmt
-
-
-def detect_format_from_file(file_name: Path) -> str | None:
-    """Detect format from file content, independent of file extension."""
-    with file_name.open("rb") as fh:
-        raw = fh.read()
-    return _detect_format_from_bytes(raw)
 
 
 def _detect_format_from_bytes(raw: bytes) -> str | None:
@@ -684,12 +684,14 @@ def try_load_file(
     """Load a file, returning a Databook when possible, else a Dataset.
 
     Encapsulates the "try Databook, fall back to Dataset" handshake so
-    callers don't reimplement it.
+    callers don't reimplement it. Reads and detects once and tries both
+    interpretations on the same payload, like try_load_stdin, so a
+    wrong-extension file warns about the mismatch once, not once per
+    attempted shape.
     """
-    book = load_databook_file(file_name, extra_args=extra_args, in_format=in_format)
-    if book is not None:
-        return book
-    return load_dataset_file(file_name, extra_args=extra_args, in_format=in_format)
+    raw = file_name.read_bytes()
+    fmt = _resolve_input_format(file_name, in_format, raw)
+    return _import_any(raw, fmt, filter_args("load", extra_args, fmt))
 
 
 def try_load_stdin(
@@ -705,6 +707,17 @@ def try_load_stdin(
     load_dataset_stdin up front (stdin can only be consumed once).
     """
     raw, fmt, extra_load_args = _read_and_detect_stdin(in_format, extra_args, stdin)
+    return _import_any(raw, fmt, extra_load_args)
+
+
+def _import_any(
+    raw: bytes, fmt: str, extra_load_args: dict[str, Any]
+) -> tablib.Databook | tablib.Dataset:
+    """Import one payload as a Databook when possible, else a Dataset.
+
+    See load_databook_file for the catch policy; genuine load errors
+    propagate.
+    """
     data = raw if is_bin(fmt) else raw.decode()
     try:
         return tablib.Databook().load(data, format=fmt, **extra_load_args)

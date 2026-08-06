@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   truncate `out.csv` to 0 bytes before reporting that csv does not support
   multi-sheet output; the file is now left exactly as it was, and a file that
   did not exist is not created.
+* An input file whose extension does not match its content (e.g. CSV data in
+  a `.xls` file) printed the "Extension suggests ... but content detected
+  as ..." warning twice and was read up to four times; it is now read once
+  and the warning is printed once.
 
 ## [0.6.0] - 2026-08-05
 
