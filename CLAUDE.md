@@ -30,7 +30,7 @@ For the design rationale (detection policy, Dataset-vs-Databook split, the
 "no static capability matrix" principle, error boundary) read `docs/design.md`
 and the decision log in `docs/decisions.md` *before* changing format detection,
 error handling, or the load/save split. `docs/TODO.md` holds unscheduled work
-that has not been started.
+that has not been started. `docs/RELEASING.md` is the release procedure.
 
 ## Changelog & decision log
 
