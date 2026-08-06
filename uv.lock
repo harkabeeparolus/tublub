@@ -507,7 +507,7 @@ wheels = [
 
 [[package]]
 name = "tublub"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "tablib", extra = ["cli", "ods", "xls", "xlsx", "yaml"] },

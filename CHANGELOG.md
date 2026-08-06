@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-06
+
 ### Added
 
 * `-y/--yes` and `-n/--no-clobber`: decide up front what happens when the
