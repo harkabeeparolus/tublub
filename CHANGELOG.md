@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-07
+
 ### Added
 
 * `--sheet` accepts cut-style index ranges: `-s 0-4` selects sheets 0 through
