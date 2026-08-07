@@ -37,7 +37,8 @@ that has not been started. `docs/RELEASING.md` is the release procedure.
 `docs/tublub.1.md` is the man page source and the authoritative user reference
 — a new flag is documented there, not in `README.md`, which is a landing page
 (decision 029); `test_man_page_documents_every_long_option` fails if you forget.
-`data/` holds the generated roff, is gitignored, and is never edited by hand.
+`data/` holds the generated roff and is never edited by hand; its *contents* are
+gitignored, but `data/.gitkeep` is tracked deliberately (decision 029).
 
 ## Changelog & decision log
 
@@ -108,6 +109,14 @@ Not every departure needs a decision entry: a roadmap sub-task that turns out un
   Don't return the payload — mirror `export_dataset`/`export_databook`: take an
   optional `file_handle`, keep the payload in a local, and write it there.
 
+## Pandoc gotchas
+
+- A definition-list term must fit on **one** source line. Wrap it and pandoc
+  emits a literal `:` with no indent instead of a definition — how the
+  `SHEET SELECTION` rules ended up a numbered list.
+- `just build_man` passes `-f markdown-smart` because the `smart` extension
+  renders `--flag` as an en dash plus `flag`. Don't drop it.
+
 ## Testing patterns
 
 - Verifying CLI error paths: `just run` swallows stderr and only reports the exit code on failure. Run `uv run tublub ARGS` directly to see the actual `parser.error`/`sys.exit` message.
@@ -160,3 +169,10 @@ Not every departure needs a decision entry: a roadmap sub-task that turns out un
 - No multi-sheet workbook is tracked in the repo; build smoke-test inputs in
   the scratchpad with tablib (`Databook()` + `export("xlsx")`). Untracked
   sample files in the repo root are ad hoc — don't assume they exist.
+- Man page rendering: `MANWIDTH=80 man -l data/share/man/man1/tublub.1 | col -bx`
+  (`col -bx` strips overstrike, so the output greps and diffs cleanly).
+- Packaging changes need a fresh `git clone` into the scratchpad, not the working
+  tree — a gitignored directory that exists locally may not exist for anyone
+  else, and since `uv run` builds the project, the symptom is `just test`
+  failing before pytest starts. Check an installed wheel with
+  `MANPATH=<venv>/share/man man tublub`.

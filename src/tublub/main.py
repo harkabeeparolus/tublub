@@ -54,6 +54,7 @@ XLSX_TITLE_LIMIT = 31  # XLSX caps worksheet titles at 31 characters
 _DASH = Path("-")
 _NAME_PREFIX = "name:"  # --sheet prefix forcing title interpretation
 _PICK_ONE_HINT = "pick one sheet with --sheet"
+_MAX_LISTED_TITLES = 10  # a longer listing is --list-sheets' job, not an error's
 
 
 # https://tablib.readthedocs.io/en/stable/formats.html
@@ -378,18 +379,26 @@ def _render_selection(
 
 
 def _resolve_sheet_tokens(sheets: list[tablib.Dataset], tokens: list[str]) -> list[int]:
-    """Resolve selector tokens to sheet indices; dedup keeps first occurrence."""
-    return list(dict.fromkeys(_resolve_one_token(sheets, t) for t in tokens))
+    """Resolve selector tokens to sheet indices; dedup keeps first occurrence.
+
+    Ranges expand here rather than at parse time because an open end needs
+    the sheet count. Expanded indices feed the same first-occurrence dedup
+    as plain ones, so the result order is selection order.
+    """
+    expanded = (i for t in tokens for i in _resolve_one_token(sheets, t))
+    return list(dict.fromkeys(expanded))
 
 
-def _resolve_one_token(sheets: list[tablib.Dataset], token: str) -> int:
-    """Resolve one selector token: name:-forced title, index, or title."""
+def _resolve_one_token(sheets: list[tablib.Dataset], token: str) -> list[int]:
+    """Resolve one selector token: name:-forced title, range, index, or title."""
     if token.startswith(_NAME_PREFIX):
         # Strip exactly one prefix; "name:name:X" selects the literal "name:X".
-        return _match_title(sheets, token.removeprefix(_NAME_PREFIX))
+        return [_match_title(sheets, token.removeprefix(_NAME_PREFIX))]
+    if (bounds := _parse_range_token(token)) is not None:
+        return _resolve_range(sheets, token, *bounds)
     if _is_int_token(token):
-        return _resolve_index(sheets, token)
-    return _match_title(sheets, token)
+        return [_resolve_index(sheets, token)]
+    return [_match_title(sheets, token)]
 
 
 def _resolve_index(sheets: list[tablib.Dataset], token: str) -> int:
@@ -398,9 +407,34 @@ def _resolve_index(sheets: list[tablib.Dataset], token: str) -> int:
     if 0 <= idx < len(sheets):
         return idx
     msg = f"sheet index {idx} out of range (0-{len(sheets) - 1})"
+    raise TublubError(msg + _title_hint(sheets, token))
+
+
+def _resolve_range(
+    sheets: list[tablib.Dataset], token: str, start: int, end: int | None
+) -> list[int]:
+    """Expand a range token into 0-based sheet indices, inclusive both ends.
+
+    An open end means "through the last sheet" — the reason ranges expand
+    at resolution time, once the sheet count is known. An endpoint past the
+    last sheet is an error rather than a clamp: like an out-of-range index,
+    a selector naming sheets the input does not have is more likely a
+    mistake than a shorthand.
+    """
+    last = len(sheets) - 1
+    if end is None:
+        end = last
+    if start > last or end > last:
+        msg = f"sheet range {token} out of range (0-{last})"
+        raise TublubError(msg + _title_hint(sheets, token))
+    return list(range(start, end + 1))
+
+
+def _title_hint(sheets: list[tablib.Dataset], token: str) -> str:
+    """Build the name: escape-hatch hint when a sheet is titled like the token."""
     if any(sheet.title == token for sheet in sheets):
-        msg += f"; for the sheet titled '{token}' use --sheet name:{token}"
-    raise TublubError(msg)
+        return f"\nfor the sheet titled '{token}' use --sheet name:{token}"
+    return ""
 
 
 def _match_title(sheets: list[tablib.Dataset], wanted: str) -> int:
@@ -424,12 +458,32 @@ def _match_title(sheets: list[tablib.Dataset], wanted: str) -> int:
 
 
 def _no_title_match_msg(wanted: str, titled: list[tuple[int, str]]) -> str:
-    """Compose the no-such-title error, listing what is selectable."""
-    titles = ", ".join(f"'{title}'" for _, title in titled)
-    msg = f"no sheet titled '{wanted}'; available titles: {titles}"
+    """Compose the no-such-title error, describing what is selectable.
+
+    A hint about how to fix the command goes on its own line, so it does
+    not disappear into the tail of a long wrapped title listing.
+    """
+    msg = f"no sheet titled '{wanted}'; {_available_titles(titled)}"
     if "," in wanted:
-        msg += "; repeat --sheet to select multiple sheets by name"
+        msg += "\nrepeat --sheet to combine names with indices or ranges"
     return msg
+
+
+def _available_titles(titled: list[tuple[int, str]]) -> str:
+    """Describe the selectable titles, capped, or say there are none.
+
+    A long listing is truncated rather than dumped: past a handful of
+    titles it stops being something you can fix your typo from at a
+    glance, and --list-sheets shows the same titles with their indices
+    and sizes.
+    """
+    if not titled:
+        return "this input's sheets have no titles, select by index"
+    shown = ", ".join(f"'{title}'" for _, title in titled[:_MAX_LISTED_TITLES])
+    extra = len(titled) - _MAX_LISTED_TITLES
+    if extra > 0:
+        shown += f"; and {extra} more, run --list-sheets to see them all"
+    return f"available titles: {shown}"
 
 
 def _databook_subset(
@@ -1043,8 +1097,8 @@ def _cook_sheet_tokens(
     """Expand --sheet occurrences into selector tokens.
 
     An occurrence is comma-split only when every comma-piece is an integer
-    (after strip); otherwise it is one literal title token, kept whole so
-    titles like "Revenue, EMEA" survive.
+    or a cut-style range (after strip); otherwise it is one literal title
+    token, kept whole so titles like "Revenue, EMEA" survive.
     """
     if occurrences is None:
         return None
@@ -1055,13 +1109,27 @@ def _cook_sheet_tokens(
 
 
 def _cook_one_occurrence(parser: argparse.ArgumentParser, occ: str) -> list[str]:
-    """Split one --sheet occurrence into tokens (see _cook_sheet_tokens)."""
+    """Split one --sheet occurrence into tokens (see _cook_sheet_tokens).
+
+    A piece counts as a selector when it is an integer or a cut-style
+    range. A decreasing range is a static defect in the command line and
+    errors here, before any input is read.
+    """
     pieces = [p.strip() for p in occ.split(",")]
     if not all(pieces):
         parser.error("no sheet selector given")
-    if all(_is_int_token(p) for p in pieces):
-        return pieces
-    return [occ]
+    if not all(_is_int_token(p) or _parse_range_token(p) is not None for p in pieces):
+        return [occ]
+    for piece in pieces:
+        _reject_decreasing(parser, piece)
+    return pieces
+
+
+def _reject_decreasing(parser: argparse.ArgumentParser, piece: str) -> None:
+    """Error out (which exits) if the piece is a decreasing range like 4-2."""
+    bounds = _parse_range_token(piece)
+    if bounds is not None and bounds[1] is not None and bounds[0] > bounds[1]:
+        parser.error(f"invalid decreasing sheet range {piece}")
 
 
 def _is_int_token(token: str) -> bool:
@@ -1071,6 +1139,26 @@ def _is_int_token(token: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _parse_range_token(token: str) -> tuple[int, int | None] | None:
+    """Parse a cut-style index range token, or return None for anything else.
+
+    Recognizes exactly two shapes: closed N-M (inclusive both ends) and
+    open-ended N- (through the last sheet, whose count only the resolver
+    knows — hence the None end). Endpoints must be bare decimal digits, so
+    a sign, inner whitespace or a second dash disqualifies the token and it
+    falls through to the title grammar. cut's -M prefix shape is
+    deliberately not recognized: a leading dash reads as a negative index
+    to anyone coming from Python, and -1 must keep meaning "index -1, out
+    of range". 0-M spells the same prefix range explicitly.
+    """
+    start, dash, end = token.partition("-")
+    if not dash or not start.isdecimal():
+        return None
+    if end:
+        return (int(start), int(end)) if end.isdecimal() else None
+    return (int(start), None)
 
 
 def _should_use_implicit_stdin(
@@ -1273,8 +1361,9 @@ def build_argument_parser() -> argparse.ArgumentParser:
         action="append",
         help=(
             "select sheet(s) by 0-based index or title: '-s 0,2' picks "
-            "indices, repeat -s to pick several titles, 'name:2024' forces "
-            "a title match"
+            "indices, '-s 1-3' an inclusive range and '-s 2-' through the "
+            "last sheet, repeat -s to pick several titles, 'name:2024' "
+            "forces a title match"
         ),
     )
     input_group.add_argument(

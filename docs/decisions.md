@@ -964,3 +964,68 @@ project, where this pipeline is already in production. The two divergences from
 it are deliberate: build-time `footer`/`date` injection instead of hardcoded
 front matter, and `-f markdown-smart` — pylendar's page currently renders its
 own `--init` and `--version` with an en dash for want of it.
+
+### 030. `--sheet` index ranges: cut's increasing shapes only, expanded at resolution
+*2026-08-07 · Accepted*
+
+**Context.** The TODO listed index ranges (`--sheet 0-4`) as a fit for 017's
+integers-only comma rule. cut(1) is the natural grammar to borrow, but it has
+three shapes (`N-M`, `N-`, `-M`) and silently tolerates out-of-range fields,
+while tublub already promises that integer-looking tokens are always indices
+(016) and that an occurrence comma-splits only when every piece is a selector
+(017).
+
+**Decision.**
+
+- Two shapes: closed `N-M` (0-based, inclusive both ends) and open-ended `N-`
+  (through the last sheet). Endpoints are bare decimal digits; a sign, inner
+  whitespace, or a second dash makes the token a title.
+- cut's `-M` prefix shape is deliberately omitted: `-s -1` keeps erroring
+  "sheet index -1 out of range", guarding users who expect Python-style
+  negative indexing; `0-M` spells the prefix range explicitly.
+- A decreasing range (`4-2`) is a parse-time error ("invalid decreasing sheet
+  range 4-2"), like cut's "invalid decreasing range" — a static defect that
+  needs no input to diagnose.
+- Ranges join 017's comma grammar: an occurrence splits when every piece is an
+  integer *or a range*, else it stays one literal title token. Range-shaped
+  tokens are always ranges, never title matches, extending 016's always-index
+  rule; `name:` remains the escape hatch for a sheet titled like a range.
+  017's grammar clause is extended, not otherwise changed. A mixed attempt
+  like `-s 2-4,Users` therefore stays a title miss; its hint is reworded to
+  "repeat --sheet to combine names with indices or ranges", and stays generic
+  because echoing a concrete split would mislead for a genuine
+  comma-containing title.
+- Expansion happens at resolution time — an open end needs the sheet count —
+  and an endpoint past the last sheet errors ("sheet range 0-4 out of range
+  (0-2)", with the `name:` hint when a title matches the token) rather than
+  clamping. Expanded indices feed the same order-preserving first-occurrence
+  dedup as plain indices; a range that reduces to one sheet takes the plain
+  single-sheet render path.
+- The no-such-title error lists at most ten titles and then says "and N more,
+  run --list-sheets to see them all"; when no sheet carries a title it says
+  "this input's sheets have no titles, select by index" instead of trailing a
+  bare colon.
+- A hint about how to fix the command — the `name:` escape hatch, the repeat
+  suggestion — goes on its own line rather than after another semicolon. The
+  elision marker stays attached to the listing it truncates, since it says
+  what is missing rather than what to type.
+
+**Why.** Ranges must not weaken the two guarantees that make the selector
+grammar predictable: a numeric-looking token is never quietly a title, and a
+selector naming sheets the input does not have is a mistake, not a shorthand.
+cut's silent tolerance suits field streams, not named selections, so an
+out-of-range range errors exactly as an out-of-range index does (016).
+Dropping `-M` costs nothing (`0-M` exists) and keeps `-1` an error surface for
+the most likely misreading of the syntax. Expanding through the existing dedup
+keeps ranges a pure spelling shortcut: `-s 0-2` and `-s 0,1,2` are the same
+request everywhere downstream.
+
+Capping the title listing rather than replacing it with a pointer keeps the
+common case cheap: most workbooks have a handful of sheets, where the list is
+itself the answer and a second command would be pure overhead. Past the cap it
+stops being something you can fix a typo from at a glance — a plausible
+24-sheet quarterly workbook produced a 713-character single-line error — and
+017's rule of thumb already makes `--list-sheets` the canonical listing, with
+indices and sizes the error cannot show. Breaking the fix onto its own line
+follows from the same measurement: a hint appended to a listing that wraps
+across several terminal lines is a hint nobody finds.

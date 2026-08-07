@@ -137,9 +137,12 @@ Three rules cover the whole surface.
     like this.
 
 3.  Commas are for index lists, repeated **-s** is for names, and `name:`
-    forces a title. So `-s 0,2` takes two indices, `-s people -s cities`
-    takes two titles, and `-s name:2024` picks the sheet *titled* `2024`
-    rather than index 2024.
+    forces a title. Index lists may include inclusive ranges: `-s 0,2`
+    takes two indices, `-s 1-3` takes three, `-s 2-` runs from index 2
+    through the last sheet, and a decreasing range like `4-2` is an error.
+    `-s people -s cities` takes two titles, and `-s name:2024` picks the
+    sheet *titled* `2024` rather than index 2024 — the same escape hatch
+    reaches a sheet titled like a range, say `name:2019-2024`.
 
 # OUTPUT FILES
 
@@ -228,7 +231,7 @@ Pick one sheet and it prints like any single-sheet file:
 
 Pick several and each gets a heading:
 
-    $ tublub -s 0,1 book.xlsx
+    $ tublub -s 0-1 book.xlsx
     === people (2 rows) ===
     name      age
     Alice      30

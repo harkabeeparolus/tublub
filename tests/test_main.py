@@ -1095,6 +1095,48 @@ def test_empty_selector_rejected(multi_sheet_xlsx, selector):
         parse_command_line(["-s", selector, str(multi_sheet_xlsx)])
 
 
+# ranges
+
+
+@pytest.mark.parametrize("selector", ["0-4", "2-"])
+def test_bare_range_kept_whole(multi_sheet_xlsx, selector):
+    args, _ = parse_command_line(["-s", selector, str(multi_sheet_xlsx)])
+    assert args.sheets == [selector]
+
+
+def test_range_in_comma_list_splits(multi_sheet_xlsx):
+    args, _ = parse_command_line(["-s", "0,2-4", str(multi_sheet_xlsx)])
+    assert args.sheets == ["0", "2-4"]
+
+
+def test_all_range_comma_list_splits(multi_sheet_xlsx):
+    args, _ = parse_command_line(["-s", "0-1,2-", str(multi_sheet_xlsx)])
+    assert args.sheets == ["0-1", "2-"]
+
+
+@pytest.mark.parametrize("selector", ["0 - 4", "0-4-6", "0-+4", "-"])
+def test_non_range_shapes_stay_literal(multi_sheet_xlsx, selector):
+    args, _ = parse_command_line(["-s", selector, str(multi_sheet_xlsx)])
+    assert args.sheets == [selector]
+
+
+def test_range_mixed_with_title_stays_literal(multi_sheet_xlsx):
+    args, _ = parse_command_line(["-s", "0-2,Users", str(multi_sheet_xlsx)])
+    assert args.sheets == ["0-2,Users"]
+
+
+def test_decreasing_range_rejected(multi_sheet_xlsx, capsys):
+    with pytest.raises(SystemExit):
+        parse_command_line(["-s", "4-2", str(multi_sheet_xlsx)])
+    assert "invalid decreasing sheet range 4-2" in capsys.readouterr().err
+
+
+def test_decreasing_range_in_comma_list_rejected(multi_sheet_xlsx, capsys):
+    with pytest.raises(SystemExit):
+        parse_command_line(["-s", "0,4-2", str(multi_sheet_xlsx)])
+    assert "invalid decreasing sheet range 4-2" in capsys.readouterr().err
+
+
 def test_combined_with_all_sheets_rejected(multi_sheet_xlsx):
     with pytest.raises(SystemExit):
         parse_command_line(["-s", "0", "--all-sheets", str(multi_sheet_xlsx)])
@@ -1166,7 +1208,7 @@ def test_year_index_out_of_range_hints_name(year_title_json):
         cli(["-s", "2024", str(year_title_json)])
     msg = str(excinfo.value)
     assert "sheet index 2024 out of range (0-0)" in msg
-    assert "--sheet name:2024" in msg
+    assert "\nfor the sheet titled '2024' use --sheet name:2024" in msg
 
 
 def test_name_prefix_forces_title(year_title_json, capsys):
@@ -1224,6 +1266,25 @@ def test_unknown_title_lists_titles(multi_sheet_xlsx):
     assert "'people'" in msg
     assert "'cities'" in msg
     assert "repeat --sheet" not in msg
+    assert "--list-sheets" not in msg
+
+
+def test_many_titles_truncated_with_list_hint(many_sheets_json):
+    with pytest.raises(SystemExit) as excinfo:
+        cli(["-s", "nope", str(many_sheets_json)])
+    msg = str(excinfo.value)
+    assert "'sheet00'" in msg
+    assert "'sheet09'" in msg
+    assert "'sheet10'" not in msg
+    assert "and 2 more, run --list-sheets to see them all" in msg
+
+
+def test_untitled_sheets_say_select_by_index(untitled_sheets_json):
+    with pytest.raises(SystemExit) as excinfo:
+        cli(["-s", "nope", str(untitled_sheets_json)])
+    msg = str(excinfo.value)
+    assert "this input's sheets have no titles, select by index" in msg
+    assert "available titles" not in msg
 
 
 def test_comma_miss_adds_repeat_hint(multi_sheet_xlsx):
@@ -1231,7 +1292,7 @@ def test_comma_miss_adds_repeat_hint(multi_sheet_xlsx):
         cli(["-s", "0,people", str(multi_sheet_xlsx)])
     msg = str(excinfo.value)
     assert "no sheet titled '0,people'" in msg
-    assert "repeat --sheet to select multiple sheets by name" in msg
+    assert "\nrepeat --sheet to combine names with indices or ranges" in msg
 
 
 def test_sheet_empty_workbook_errors(empty_workbook):
@@ -1274,6 +1335,64 @@ def test_one_sheet_workbook_selectable_by_title(one_sheet_xlsx, capsys):
     assert "Alice" in capsys.readouterr().out
 
 
+# ranges
+
+
+def test_range_out_of_range_errors(multi_sheet_json):
+    with pytest.raises(SystemExit) as excinfo:
+        cli(["-s", "0-4", str(multi_sheet_json)])
+    msg = str(excinfo.value)
+    assert "sheet range 0-4 out of range (0-2)" in msg
+    assert "name:" not in msg
+
+
+def test_open_range_past_last_errors(multi_sheet_json):
+    with pytest.raises(SystemExit) as excinfo:
+        cli(["-s", "3-", str(multi_sheet_json)])
+    assert "sheet range 3- out of range (0-2)" in str(excinfo.value)
+
+
+def test_range_out_of_range_hints_name(range_title_json):
+    with pytest.raises(SystemExit) as excinfo:
+        cli(["-s", "1-5", str(range_title_json)])
+    msg = str(excinfo.value)
+    assert "sheet range 1-5 out of range (0-0)" in msg
+    assert "\nfor the sheet titled '1-5' use --sheet name:1-5" in msg
+
+
+def test_name_prefix_selects_range_titled_sheet(range_title_json, capsys):
+    rc = cli(["-s", "name:1-5", str(range_title_json)])
+    assert rc == 0
+    assert "Jan" in capsys.readouterr().out
+
+
+def test_range_on_single_sheet_book(year_title_json, capsys):
+    rc = cli(["-s", "0-0", str(year_title_json)])
+    assert rc == 0
+    assert "Jan" in capsys.readouterr().out
+
+
+def test_negative_index_still_errors_out_of_range(multi_sheet_json):
+    with pytest.raises(SystemExit) as excinfo:
+        cli(["-s", "-1", str(multi_sheet_json)])
+    assert "sheet index -1 out of range (0-2)" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("selector", ["-", "0-4-6"])
+def test_dashed_non_range_is_title_miss(multi_sheet_json, selector):
+    with pytest.raises(SystemExit) as excinfo:
+        cli(["-s", selector, str(multi_sheet_json)])
+    assert f"no sheet titled '{selector}'" in str(excinfo.value)
+
+
+def test_range_comma_title_miss_hints_repeat(multi_sheet_json):
+    with pytest.raises(SystemExit) as excinfo:
+        cli(["-s", "2-4,Users", str(multi_sheet_json)])
+    msg = str(excinfo.value)
+    assert "no sheet titled '2-4,Users'" in msg
+    assert "\nrepeat --sheet to combine names with indices or ranges" in msg
+
+
 # cli level: rendering
 
 
@@ -1311,6 +1430,53 @@ def test_dedup_to_single_renders_plain(multi_sheet_json, capsys):
     assert rc == 0
     assert "===" not in out
     assert "Alice" in out
+
+
+# ranges
+
+
+def test_closed_range_selects_inclusive_span(multi_sheet_json, capsys):
+    rc = cli(["-s", "0-1", str(multi_sheet_json)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    headings = [ln for ln in out.splitlines() if ln.startswith("=== ")]
+    assert headings == ["=== people (2 rows) ===", "=== cities (2 rows) ==="]
+
+
+def test_open_range_runs_to_last_sheet(multi_sheet_json, capsys):
+    rc = cli(["-s", "1-", str(multi_sheet_json)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    headings = [ln for ln in out.splitlines() if ln.startswith("=== ")]
+    assert headings == ["=== cities (2 rows) ===", "=== products (1 rows) ==="]
+
+
+def test_range_to_single_sheet_renders_plain(multi_sheet_json, capsys):
+    rc = cli(["-s", "1-1", str(multi_sheet_json)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "===" not in out
+    assert "Stockholm" in out
+
+
+def test_range_mixed_with_index_keeps_order(multi_sheet_json, capsys):
+    rc = cli(["-s", "2,0-1", str(multi_sheet_json)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    headings = [ln for ln in out.splitlines() if ln.startswith("=== ")]
+    assert headings == [
+        "=== products (1 rows) ===",
+        "=== people (2 rows) ===",
+        "=== cities (2 rows) ===",
+    ]
+
+
+def test_range_overlap_dedups(multi_sheet_json, capsys):
+    rc = cli(["-s", "0-1,0", str(multi_sheet_json)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    headings = [ln for ln in out.splitlines() if ln.startswith("=== ")]
+    assert headings == ["=== people (2 rows) ===", "=== cities (2 rows) ==="]
 
 
 def test_repeat_flag_mixes_title_and_index(multi_sheet_json, capsys):

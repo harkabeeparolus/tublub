@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
+* `--sheet` accepts cut-style index ranges: `-s 0-4` selects sheets 0 through
+  4 inclusive, `-s 2-` runs from sheet 2 through the last one, and ranges mix
+  with plain indices in one comma list (`-s 0,2-4`). A sheet *titled* like a
+  range is still reachable with `name:`.
 * A Unix manual page, shipped inside the wheel. `pipx install tublub`
   (pipx 1.5 or later) puts it on your manpath, so `man tublub` works; a plain
   `pip install` places it under the environment's `share/man`. `uv tool
@@ -18,6 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Changed
 
+* A `--sheet` argument that mixes a title into a comma list now hints "repeat
+  --sheet to combine names with indices or ranges", since the mistake is no
+  longer only about names.
+* The no-such-title error lists at most ten titles before pointing at
+  `--list-sheets`, rather than dumping every title of a large workbook onto
+  one line. When no sheet has a title it now says so and suggests selecting
+  by index, instead of ending in a bare colon.
+* Sheet selection hints — the `name:` escape hatch and the repeat suggestion
+  — print on their own line below the error rather than trailing it after a
+  semicolon.
 * `README.md` is a landing page again: the multi-sheet manual it had grown
   now lives in the manual page, and a short teaser plus install instructions
   took its place.

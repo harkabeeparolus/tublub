@@ -156,6 +156,33 @@ def year_title_json(tmp_path):
 
 
 @pytest.fixture
+def range_title_json(tmp_path):
+    """Write a JSON workbook with a single sheet titled "1-5"."""
+    return _write_json_book(
+        tmp_path / "span.json",
+        [("1-5", [{"month": "Jan", "total": 100}])],
+    )
+
+
+@pytest.fixture
+def many_sheets_json(tmp_path):
+    """Write a JSON workbook with more sheets than an error lists titles for."""
+    return _write_json_book(
+        tmp_path / "many.json",
+        [(f"sheet{i:02d}", [{"n": i}]) for i in range(12)],
+    )
+
+
+@pytest.fixture
+def untitled_sheets_json(tmp_path):
+    """Write a JSON workbook whose sheets all have empty titles."""
+    return _write_json_book(
+        tmp_path / "untitled.json",
+        [("", [{"name": "Alice"}]), ("", [{"name": "Bob"}])],
+    )
+
+
+@pytest.fixture
 def empty_title_json(tmp_path):
     """Write a JSON workbook with an empty-titled sheet and a named one."""
     return _write_json_book(

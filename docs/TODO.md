@@ -64,7 +64,9 @@ satisfies both.
 - `book.xlsx::Sheet1` per-input selection — the `::` separator stays
   reserved for this (and is why `__` was chosen for expansion titles).
   Unlocks selection in multi-input mode.
-- Index ranges (`--sheet 0-4`) — fits the integers-only comma rule.
+- Index ranges (`--sheet 0-4`) — DONE, shipped (unreleased): cut-style `N-M`
+  and `N-` per decision 030 (no `-M` shape, decreasing ranges are a parse
+  error, out-of-range errors rather than clamps).
 - `--exclude-sheet NAME` — "everything but the Notes sheet".
 - `--list-sheets -t json` machine-readable listing — would lift the
   `--list-sheets`/`-t` mutual exclusion; don't foreclose it, don't build it
