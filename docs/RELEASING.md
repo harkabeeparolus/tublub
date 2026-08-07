@@ -24,3 +24,17 @@ worked examples.
    Publishing is the trigger: `.github/workflows/python-publish.yml` runs on
    `release: published` and uploads to PyPI via trusted publishing. A draft
    fires nothing.
+
+## Troubleshooting
+
+**Publishing the release fired no workflow run.** GitHub drops events during
+Actions outages, and dropped events are never replayed. Nothing in the repo is
+wrong and no new version is needed: wait for the outage to clear, then retry.
+
+To tell an outage from a real problem, check whether recent *pushes* also missed
+their zizmor run (`gh run list`) and confirm on githubstatus.com. To retry once
+it is resolved, `gh release edit vX.Y.Z --draft` then
+`gh release edit vX.Y.Z --draft=false` re-fires `release: published` without
+touching the tag. Deleting and recreating the release works too — but neither
+does anything while the outage is still on, so retrying early looks like a
+second failure. First hit at 0.7.0.
