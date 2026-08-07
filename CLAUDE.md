@@ -16,6 +16,7 @@ just typecheck  # mypy + ty
 just test       # pytest
 just audit      # zizmor audit of .github/ (offline mode)
 just check      # all of the above
+just ci         # what GitHub Actions runs: lint_check (no --fix) + typecheck + test
 just run ARGS  # run the CLI from the dev checkout, e.g. `just run --list`
 just build_man # pandoc docs/tublub.1.md -> data/ (needs pandoc)
 just build     # build_man + uv build; never plain `uv build` for a release

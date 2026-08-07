@@ -11,6 +11,11 @@ lint:
     uv run ruff check --fix
     uv run ruff format
 
+# Check lint and formatting without rewriting files (for CI)
+lint_check:
+    uv run ruff check
+    uv run ruff format --check
+
 # Run type checking (mypy + ty)
 typecheck:
     uv run mypy --ignore-missing-imports src
@@ -26,6 +31,10 @@ audit:
 
 # Run all checks (lint, typecheck, test, audit)
 check: lint typecheck test audit
+
+# What GitHub Actions runs: check, minus the file rewriting and the audit
+# that the zizmor workflow already does online
+ci: lint_check typecheck test
 
 # Build the man page from its Markdown source (requires pandoc)
 [unix]

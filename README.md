@@ -1,5 +1,8 @@
 # tublub
 
+[![PyPI](https://img.shields.io/pypi/v/tublub)](https://pypi.org/project/tublub/)
+[![Tests](https://github.com/harkabeeparolus/tublub/actions/workflows/tests.yml/badge.svg)](https://github.com/harkabeeparolus/tublub/actions/workflows/tests.yml)
+
 Convert or view tabular data files — CSV, JSON, XLSX, YAML, and more — from
 the command line.
 
