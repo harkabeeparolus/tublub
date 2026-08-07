@@ -25,6 +25,12 @@ worked examples.
    `release: published` and uploads to PyPI via trusted publishing. A draft
    fires nothing.
 
+Nothing here builds the man page by hand: the publish workflow installs pandoc
+and runs `just build_man` before `uv build`, and it stamps the page with the
+version from `pyproject.toml`, so step 2 is what sets it. To build a
+distribution locally, use `just build` (needs pandoc) rather than a bare
+`uv build`, which would ship a wheel with no man page.
+
 ## Troubleshooting
 
 **Publishing the release fired no workflow run.** GitHub drops events during

@@ -127,3 +127,10 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Generated man page (just build_man); source is docs/tublub.1.md. Only data/
+# itself is tracked (.gitkeep), because uv_build fails outright when a
+# configured data dir is missing — a fresh clone must be buildable without
+# pandoc. Everything under it is generated.
+/data/*
+!/data/.gitkeep

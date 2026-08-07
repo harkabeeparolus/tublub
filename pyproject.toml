@@ -34,8 +34,19 @@ dev = [
 ]
 
 [build-system]
-requires = ["uv_build>=0.10.0,<0.12.0"]
+requires = ["uv_build>=0.12.2,<0.13.0"]
 build-backend = "uv_build"
+
+# The generated man page (`just build_man`) rides into the wheel's data
+# directory: data/share/man/man1/tublub.1 installs to <prefix>/share/man/,
+# which pipx >= 1.5 links onto the user's manpath. data/.gitkeep only exists so
+# a fresh clone has that directory — uv_build refuses to build without it, and
+# only the configured directory itself has to be there. Excluded from the wheel
+# so it isn't installed alongside the page; it stays in the sdist, which is what
+# keeps the directory present for the wheel build.
+[tool.uv.build-backend]
+wheel-exclude = ["**/.gitkeep"]
+data = { data = "data" }
 
 [tool.ruff.lint]
 select = ["ALL"]

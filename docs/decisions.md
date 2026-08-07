@@ -888,3 +888,79 @@ entry is about.
 Not a breaking output change for records-shaped json/yaml or the single-sheet
 text formats — none of them carries a sheet name. Supersedes the sketch's
 save/export placement wording and settles its open stdin question.
+
+---
+
+### 029. The manual page is the user manual; the README is a landing page
+*2026-08-07 · Accepted*
+
+**Context.** `README.md` had grown to 139 lines, 83 of them a multi-sheet
+manual — the three selection rules, the every-sheet conversion policy, the
+single-sheet fallback, the strictness of `--all-sheets`, worked examples of
+each. That is reference documentation living on a landing page, and it was
+already stale: the first output example still showed Tablib's old
+pipe-separated rendering rather than the table the `cli` default has printed
+since 0.5.0. A second problem was reach — the reference was only readable on
+GitHub, and a CLI tool is expected to answer `man tublub`.
+
+**Decision.**
+- **The manual page is the reference; the README is a landing page.** The
+  multi-sheet manual moves to a new `docs/tublub.1.md`, written in Pandoc
+  Markdown with YAML front matter. The README keeps the pitch, the example
+  block, the `-o` and overwrite paragraphs, a short multi-sheet teaser, install
+  instructions, and a pointer to the page.
+- **Generated at build time, never committed.** `just build_man` runs pandoc
+  into `data/share/man/man1/tublub.1`; everything under `data/` is gitignored
+  except a `.gitkeep` holding the directory itself, because uv_build fails
+  outright when a configured data dir is missing and `uv run` builds the
+  project — without the placeholder, a fresh clone can not even run the tests.
+  `wheel-exclude` keeps that placeholder out of installed environments, while
+  leaving it in the sdist, which is what keeps the directory present for the
+  wheel build. `just build` chains the man page before `uv build`, and the
+  publish workflow does the same (apt pandoc, pinned
+  `extractions/setup-just`) since uv_build has no build hooks that could run
+  pandoc from inside `uv build`.
+- **`footer` and `date` are injected at build time** with `pandoc -M`, not
+  written into the front matter, so no release step has to bump them and
+  `RELEASING.md` is unchanged.
+- **Shipped via the wheel's data directory**, `[tool.uv.build-backend.data]
+  data = "data"`, which installs to `<prefix>/share/man/man1/tublub.1`.
+- **Built with `-f markdown-smart`.** Pandoc's `smart` extension renders
+  `--verbose` as an en dash plus `verbose`; disabling it is what keeps long
+  options readable in roff.
+- **A test guards the OPTIONS list.** `test_man_page_documents_every_long_option`
+  regexes the long flags out of `format_help()` and asserts each appears in
+  `docs/tublub.1.md`.
+
+**Why.** The multi-sheet roadmap declined a README flag table because a second
+list of flags drifts from `--help`, and that reasoning survives here: the
+manual page's OPTIONS section *is* that second list, so it only earns its place
+with a drift guard, which is why the sync test is part of this decision rather
+than an extra. One reference is also the point of moving the manual at all —
+a landing page that documents behaviour competes with the page that is supposed
+to.
+
+Generating rather than committing follows the same rule the project already
+applies to `uv.lock` pins and version strings: one source of truth, no
+hand-maintained derivative. Committing the roff would mean reviewing generated
+diffs and would let the two files disagree.
+
+Both wheel-data choices were verified rather than assumed. uv_build's data
+directory was probed first, before any documentation was written, since a
+closed uv issue reports data directories silently missing from
+distributions: the `.1` appears in both the sdist and the wheel (uv_build does
+not skip the gitignored directory), and installing the wheel into a scratch
+venv puts it at `<venv>/share/man/man1/tublub.1` — the same place odfpy, an
+existing dependency, ships its own pages. Switching to hatchling's
+`shared-data` was the approved fallback and turned out not to be needed. The
+manpath exposure is pipx's: 1.5 and later symlink a package's
+`share/man/man[1-9]/*` into `PIPX_MAN_DIR`. `uv tool install` does not do this
+yet (astral-sh/uv#4731), so the README says so rather than implying `man
+tublub` works everywhere.
+
+The Pandoc-Markdown-with-front-matter shape, the `build_man` recipe name, and
+the apt-pandoc workflow step are all taken from the sibling `pylendar`
+project, where this pipeline is already in production. The two divergences from
+it are deliberate: build-time `footer`/`date` injection instead of hardcoded
+front matter, and `-f markdown-smart` — pylendar's page currently renders its
+own `--init` and `--version` with an en dash for want of it.

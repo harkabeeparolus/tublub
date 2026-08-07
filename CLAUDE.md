@@ -17,6 +17,8 @@ just test       # pytest
 just audit      # zizmor audit of .github/ (offline mode)
 just check      # all of the above
 just run ARGS  # run the CLI from the dev checkout, e.g. `just run --list`
+just build_man # pandoc docs/tublub.1.md -> data/ (needs pandoc)
+just build     # build_man + uv build; never plain `uv build` for a release
 ```
 
 ## Architecture
@@ -31,6 +33,11 @@ For the design rationale (detection policy, Dataset-vs-Databook split, the
 and the decision log in `docs/decisions.md` *before* changing format detection,
 error handling, or the load/save split. `docs/TODO.md` holds unscheduled work
 that has not been started. `docs/RELEASING.md` is the release procedure.
+
+`docs/tublub.1.md` is the man page source and the authoritative user reference
+— a new flag is documented there, not in `README.md`, which is a landing page
+(decision 029); `test_man_page_documents_every_long_option` fails if you forget.
+`data/` holds the generated roff, is gitignored, and is never edited by hand.
 
 ## Changelog & decision log
 
@@ -69,6 +76,11 @@ Not every departure needs a decision entry: a roadmap sub-task that turns out un
   uploads SARIF to code scanning, so CI can find things local runs don't.
 - Dependabot bumps action SHAs + version comments and `uv.lock` (grouped,
   monthly, 7-day cooldown) — don't hand-bump pins, merge its PRs instead.
+- The one pin Dependabot does *not* maintain is `uv_build` in
+  `build-system.requires`, which isn't in `uv.lock`. When uv's minor version
+  moves past the range, `uv build` warns that the requirement "does not
+  contain the current uv version" — bump it by hand to
+  `>=<installed uv>,<next minor>`, the range `uv init` would write.
 
 ## Tablib gotchas
 

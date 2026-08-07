@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Added
+
+* A Unix manual page, shipped inside the wheel. `pipx install tublub`
+  (pipx 1.5 or later) puts it on your manpath, so `man tublub` works; a plain
+  `pip install` places it under the environment's `share/man`. `uv tool
+  install` gets the file too, but does not link it yet. The page is the
+  authoritative reference for the flags, sheet selection, and multi-sheet
+  output; its source is `docs/tublub.1.md`.
+
+### Changed
+
+* `README.md` is a landing page again: the multi-sheet manual it had grown
+  now lives in the manual page, and a short teaser plus install instructions
+  took its place.
+
+### Fixed
+
+* The first output example in `README.md` still showed the old pipe-separated
+  rendering rather than the table tublub actually prints by default.
+
 ## [0.7.0] - 2026-08-06
 
 ### Added

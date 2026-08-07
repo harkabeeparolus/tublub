@@ -26,3 +26,16 @@ audit:
 
 # Run all checks (lint, typecheck, test, audit)
 check: lint typecheck test audit
+
+# Build the man page from its Markdown source (requires pandoc)
+[unix]
+build_man:
+    mkdir -p data/share/man/man1
+    pandoc docs/tublub.1.md -s -f markdown-smart -t man \
+        -M footer="tublub $(uv version --short)" -M date="$(date -I)" \
+        -o data/share/man/man1/tublub.1
+
+# Build the package (sdist + wheel), man page included
+[unix]
+build: build_man
+    uv build

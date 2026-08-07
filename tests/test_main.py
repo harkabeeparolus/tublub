@@ -2,6 +2,7 @@
 
 import io
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -2023,3 +2024,16 @@ def test_all_sheets_titles_structureless_input_too(sample_csv, tmp_path):
     rc = cli(["--all-sheets", "-o", str(out_file), str(sample_csv)])
     assert rc == 0
     assert _saved_titles(out_file) == ["data"]
+
+
+# --- man page ---
+
+
+def test_man_page_documents_every_long_option():
+    """The man page is the flag reference, so --help must not outgrow it."""
+    man_page = Path(__file__).parent.parent / "docs" / "tublub.1.md"
+    source = man_page.read_text(encoding="utf-8")
+    flags = set(re.findall(r"--[a-z][a-z-]+", build_argument_parser().format_help()))
+    assert flags, "no long options found in --help; the regex is wrong"
+    missing = sorted(flag for flag in flags if flag not in source)
+    assert not missing, f"undocumented in {man_page.name}: {', '.join(missing)}"

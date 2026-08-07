@@ -29,6 +29,15 @@ jobs:
         with:
           enable-cache: false
       
+      - name: Install pandoc
+        run: sudo apt-get update && sudo apt-get install -y pandoc
+
+      - name: Install just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+
+      - name: Build man page
+        run: just build_man
+
       - name: Build release distributions
         run: |
           uv build
