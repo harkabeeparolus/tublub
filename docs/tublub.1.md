@@ -79,7 +79,10 @@ the formats the installed Tablib supports.
 :   The CSV/TSV input data has no header row.
 
 **--skip-lines** *LINES*
-:   For CSV/TSV/XLS/XLSX input, skip this many lines at the top.
+:   For CSV/TSV/XLS/XLSX input, skip this many lines at the top. Not
+    supported when the input is a multi-sheet workbook — **tublub** reports
+    an error rather than reading one sheet and dropping the rest. Convert a
+    single sheet first, then skip lines on the result.
 
 **--no-xlsx-optimize**
 :   Disable optimized (`read_only`) loading of XLSX files. Slower, but it
@@ -152,9 +155,10 @@ output may be the data stream; anywhere else — a script, a pipe, an
 automated run — it refuses, since nothing there can answer the question.
 Decide up front with **-y** or **-n**.
 
-A multi-sheet save that the output format can not hold leaves the output file
-untouched rather than truncating it: the workbook is rendered in full before
-the file is opened.
+A save that fails leaves the output file untouched rather than truncating
+it: the data is rendered in full before the file is opened. That covers both
+a multi-sheet save the output format can not hold and data the format can
+not represent.
 
 # MULTI-SHEET OUTPUT
 

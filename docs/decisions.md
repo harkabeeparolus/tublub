@@ -1029,3 +1029,73 @@ stops being something you can fix a typo from at a glance — a plausible
 indices and sizes the error cannot show. Breaking the fix onto its own line
 follows from the same measurement: a hint appended to a listing that wraps
 across several terminal lines is a hint nobody finds.
+
+---
+
+### 031. Every save renders its payload before opening the output file
+*2026-08-08 · Accepted*
+
+**Context.** 026 buffered the multi-sheet save but kept its last bullet:
+`save_dataset_file` writes straight to the file, on the premise that its
+post-open failures are "raw Tablib tracebacks on degenerate data, not a
+designed rejection, so there is no error to move ahead of the open". The
+premise was wrong about the data: exports fail on inputs that are merely
+degenerate *for the target*, not degenerate outright. `tublub -H -t dbf -y -o
+out.dbf users.csv` (dbf needs a header row) raised `TypeError` after the
+truncation and left `out.dbf` at 0 bytes; a CSV cell holding a control byte
+did the same to an existing `.xlsx` via openpyxl's `IllegalCharacterError`.
+Real inputs hit both.
+
+**Decision.**
+- `save_dataset_file` buffers exactly as `save_databook_file` does: export
+  into an `io.BytesIO`/`io.StringIO` chosen from the format's `binary` flag,
+  then open the real file and write the finished payload. This supersedes
+  026's `save_dataset_file` bullet; everything else in 026 stands, including
+  the ban on temp-file-and-rename.
+- The failures become a designed rejection: `export_dataset` and
+  `export_databook` wrap whatever the export raised in a `TublubError`
+  ("Could not export to FMT: ...") via `_export_error`. The catch is broad by
+  design — a format's writer signals "this data will not fit" with whatever
+  its backend happened to raise, so the exception type carries nothing worth
+  branching on. `export_databook`'s `UnsupportedFormat` →
+  `MultiSheetUnsupportedError` clause stays first and untouched.
+
+**Why.** 026's own rationale applied all along: destroying data on the path
+that refuses to write it is the worst failure a converter has. The bullet
+survived because the failing exports were assumed unreachable from sane
+input, and `-H` alone disproves that. Wrapping the error is part of the same
+fix — the traceback was the symptom that made the truncation look like a
+crash instead of a policy.
+
+---
+
+### 032. A `TypeError` from a workbook load is probed, not trusted
+*2026-08-08 · Accepted*
+
+**Context.** 008 catches `UnsupportedFormat`/`KeyError`/`TypeError` around
+`Databook().load()` and treats all three as "not a workbook — fall back to a
+single sheet". But `TypeError` has a second cause: the workbook readers for
+xlsx and xls accept no `skip_lines`, so `--skip-lines 1` on a genuine
+multi-sheet workbook raised `TypeError` from the *kwarg*, fell back, and
+silently read only the first sheet — `tublub -l --skip-lines 1 book.xlsx`
+listed one anonymous sheet where the workbook has four, and `-s 2` claimed
+the input had no sheet structure.
+
+**Decision.** The shared `_load_book` helper (now used by `_import_any`,
+`load_databook_file` and `load_databook_stdin`) separates the two causes by
+retrying: on `TypeError` with load options present, attempt the plain load
+with no options. If the plain load yields two or more sheets, the input
+really is multi-sheet and the options are what failed — raise a `TublubError`
+naming the flags ("--skip-lines is not supported for multi-sheet input") with
+the workaround on its own line. If it yields one sheet or fails, fall back as
+before: the single-sheet fallback loses nothing and *applies* the options,
+which is why `--skip-lines` on a one-sheet xlsx keeps working. No message
+sniffing on the `TypeError`, and still no static capability table — the probe
+is itself an attempt, in 008's spirit.
+
+**Why.** The fallback exists to answer a shape question, and a kwarg
+rejection is not a shape answer. Conflating them made a data-dropping path
+out of an option that works fine on every single-sheet input; erroring only
+when the retry proves sheets would be lost keeps the flag maximally useful
+while making the loss impossible to hit silently. The retry costs one extra
+parse only on the path that previously ended in silent loss.

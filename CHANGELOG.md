@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Fixed
+
+* A failed save no longer destroys the output file. The data is rendered in
+  full before the file is opened, so a conversion the target format cannot
+  hold — headerless data to DBF, text with a control byte to XLSX — leaves an
+  existing output file untouched. The failure is reported as an error instead
+  of a Python traceback, on standard output conversions too.
+* `--skip-lines` on a multi-sheet input is now an error instead of silently
+  reading only the first sheet. `tublub -l --skip-lines 1 book.xlsx` reported
+  one anonymous sheet where the workbook has several; it now says the option
+  is not supported for multi-sheet input and suggests converting one sheet
+  first. Single-sheet workbooks are unaffected.
+* `--list-sheets` reported `0 cols` for input read with `-H`; it now counts
+  the columns that are there.
+* Input that is not valid UTF-8 text is reported as an error naming the file
+  (or stdin) instead of a `UnicodeDecodeError` traceback.
+* File extensions are matched case-insensitively, so `tublub users.csv
+  OUT.JSON` writes JSON rather than failing to detect the target format. An
+  uppercase extension that disagrees with the file's content now triggers the
+  same warning a lowercase one does.
+
 ## [0.8.0] - 2026-08-07
 
 ### Added

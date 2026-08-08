@@ -51,6 +51,14 @@ class FormatConfig:
 
 _MIN_DATABOOK_INPUTS = 2  # 2+ inputs → multi-sheet Databook output
 XLSX_TITLE_LIMIT = 31  # XLSX caps worksheet titles at 31 characters
+_LOAD_FLAGS = {  # load kwarg -> the flag that set it, for error messages
+    "skip_lines": "--skip-lines",
+    "read_only": "--no-xlsx-optimize",
+    "headers": "-H/--no-headers",
+    "delimiter": "-d/--delimiter",
+    "quotechar": "-q/--quotechar",
+    "dialect": "--dialect",
+}
 _DASH = Path("-")
 _NAME_PREFIX = "name:"  # --sheet prefix forcing title interpretation
 _PICK_ONE_HINT = "pick one sheet with --sheet"
@@ -318,12 +326,10 @@ def _run_list_sheets(
         sys.exit(str(exc))
     if isinstance(loaded, tablib.Databook):
         for idx, sheet in enumerate(loaded.sheets()):
-            ncols = len(sheet.headers or [])
-            print(f"[{idx}] {sheet.title}  {len(sheet)} rows x {ncols} cols")
+            print(f"[{idx}] {sheet.title}  {len(sheet)} rows x {sheet.width} cols")
     else:
         # No sheet structure: one bare line, no [idx]/title — nothing to select.
-        ncols = len(loaded.headers or [])
-        print(f"{len(loaded)} rows x {ncols} cols")
+        print(f"{len(loaded)} rows x {loaded.width} cols")
     return 0
 
 
@@ -556,8 +562,9 @@ def _run_databook(args: argparse.Namespace, extra_args: dict[str, Any]) -> int:
 
 
 def guess_file_format(filename: Path | None = None) -> str | None:
-    """Guess format from file name."""
-    if filename and (suf := filename.suffix.lstrip(".")) and suf in get_formats():
+    """Guess format from file name; extensions match case-insensitively."""
+    suf = filename.suffix.lower().lstrip(".") if filename else ""
+    if suf in get_formats():
         return suf
     return None
 
@@ -616,12 +623,10 @@ def load_databook_file(
     format doesn't support multi-sheet input at all (csv/tsv/dbf/...) or
     because a Databook-capable format (json/yaml) holds a single-Dataset
     shape (records list rather than [{title, data}, ...]). The caller
-    should fall back to load_dataset_file in both cases.
-
-    Mirrors the UnsupportedFormat handling in save_databook_file on the
-    export side so we never need a static "which formats support
-    import_book" table. KeyError/TypeError are caught alongside it
-    because tablib raises those for shape mismatches inside json/yaml.
+    should fall back to load_dataset_file in both cases. See _load_book
+    for the catch policy; it mirrors the UnsupportedFormat handling in
+    save_databook_file on the export side so we never need a static
+    "which formats support import_book" table.
 
     Genuine load errors (corrupt files, decode failures) still propagate.
     """
@@ -631,10 +636,7 @@ def load_databook_file(
 
     with _open_for_format(file_name, cfg, write=False) as fh:
         payload = fh.read()
-    try:
-        return tablib.Databook().load(payload, format=fmt, **extra_load_args)
-    except (tablib.UnsupportedFormat, KeyError, TypeError):
-        return None
+    return _load_book(payload, fmt, extra_load_args)
 
 
 def _resolve_input_format(
@@ -704,7 +706,7 @@ def load_dataset_stdin(
 ) -> tablib.Dataset:
     """Load a dataset from stdin (or any injected binary stream)."""
     raw, fmt, extra_load_args = _read_and_detect_stdin(in_format, extra_args, stdin)
-    data = raw if is_bin(fmt) else raw.decode()
+    data = raw if is_bin(fmt) else _decode_text(raw, "stdin")
     return tablib.import_set(data, format=fmt, **extra_load_args)
 
 
@@ -718,16 +720,13 @@ def load_databook_stdin(
 
     Returns None when the input is not a Databook (caller should fall
     back to load_dataset_stdin). Mirrors load_databook_file on the file
-    side; see that docstring for the catch policy. Note: stdin can only
-    be consumed once, so callers must choose this helper or
+    side; see _load_book for the catch policy. Note: stdin can only be
+    consumed once, so callers must choose this helper or
     load_dataset_stdin per invocation, not both.
     """
     raw, fmt, extra_load_args = _read_and_detect_stdin(in_format, extra_args, stdin)
-    data = raw if is_bin(fmt) else raw.decode()
-    try:
-        return tablib.Databook().load(data, format=fmt, **extra_load_args)
-    except (tablib.UnsupportedFormat, KeyError, TypeError):
-        return None
+    data = raw if is_bin(fmt) else _decode_text(raw, "stdin")
+    return _load_book(data, fmt, extra_load_args)
 
 
 def try_load_file(
@@ -746,7 +745,7 @@ def try_load_file(
     """
     raw = file_name.read_bytes()
     fmt = _resolve_input_format(file_name, in_format, raw)
-    return _import_any(raw, fmt, filter_args("load", extra_args, fmt), file_name.stem)
+    return _import_any(raw, fmt, filter_args("load", extra_args, fmt), str(file_name))
 
 
 def try_load_stdin(
@@ -767,28 +766,94 @@ def try_load_stdin(
     return _import_any(raw, fmt, extra_load_args, "stdin")
 
 
+def _load_book(
+    data: str | bytes, fmt: str, extra_load_args: dict[str, Any]
+) -> tablib.Databook | None:
+    """Load a payload as a multi-sheet workbook, or None if it is not one.
+
+    Tablib says "not a workbook" with UnsupportedFormat, KeyError or
+    TypeError, and all three mean "fall back to a single sheet". But a
+    TypeError can also mean the workbook reader simply does not accept one
+    of the load options asked for — xlsx and xls read whole workbooks but
+    skip no lines — and falling back there would quietly throw every sheet
+    but the first away. Retrying without the options tells the two apart:
+    if the plain load yields several sheets, the input really is
+    multi-sheet and the options are what failed, so that is an error. A
+    retry yielding one sheet is not worth one — the single-sheet fallback
+    loses nothing and applies the options.
+    """
+    try:
+        return tablib.Databook().load(data, format=fmt, **extra_load_args)
+    except (tablib.UnsupportedFormat, KeyError):
+        return None
+    except TypeError as exc:
+        if extra_load_args and _has_several_sheets(data, fmt):
+            raise _book_option_error(extra_load_args) from exc
+        return None
+
+
+def _has_several_sheets(data: str | bytes, fmt: str) -> bool:
+    """Whether the payload holds 2+ sheets when no load options are passed."""
+    try:
+        book = tablib.Databook().load(data, format=fmt)
+    except (tablib.UnsupportedFormat, KeyError, TypeError):
+        return False
+    return len(book.sheets()) > 1
+
+
+def _book_option_error(extra_load_args: dict[str, Any]) -> TublubError:
+    """Name the load options a multi-sheet input cannot be read with."""
+    flags = ", ".join(
+        sorted(_LOAD_FLAGS.get(k, f"--{k.replace('_', '-')}") for k in extra_load_args)
+    )
+    verb = "is" if len(extra_load_args) == 1 else "are"
+    msg = (
+        f"{flags} {verb} not supported for multi-sheet input\n"
+        f"select one sheet and convert it first, then apply {flags} to the result"
+    )
+    return TublubError(msg)
+
+
 def _import_any(
-    raw: bytes, fmt: str, extra_load_args: dict[str, Any], title: str
+    raw: bytes, fmt: str, extra_load_args: dict[str, Any], source: str
 ) -> tablib.Databook | tablib.Dataset:
     """Import one payload as a Databook when possible, else a Dataset.
 
-    See load_databook_file for the catch policy; genuine load errors
-    propagate.
+    See _load_book for the catch policy; genuine load errors propagate.
+    source names the payload's origin (a file path, or "stdin") in error
+    messages.
 
-    A payload with no sheet structure is titled after its source, so
-    saving it to a format that carries sheet names writes that name
+    A payload with no sheet structure is titled after its source's stem,
+    so saving it to a format that carries sheet names writes that name
     instead of Tablib's "Tablib Dataset" placeholder — and writes the
     same name whether or not a second input is present. Sheets that came
     with titles of their own are left alone; the title is clamped like
     any other because the same 31-char cap applies.
     """
-    data = raw if is_bin(fmt) else raw.decode()
+    data = raw if is_bin(fmt) else _decode_text(raw, source)
+    book = _load_book(data, fmt, extra_load_args)
+    if book is not None:
+        return book
+    dataset = tablib.import_set(data, format=fmt, **extra_load_args)
+    dataset.title = _fit_title(Path(source).stem)
+    return dataset
+
+
+def _decode_text(raw: bytes, source: str) -> str:
+    """Decode input bytes as UTF-8 text, or fail with a readable message.
+
+    Every text format Tablib parses wants str, so a mis-encoded byte in a
+    CSV would otherwise surface as a decoder traceback naming a byte
+    offset rather than the input.
+    """
     try:
-        return tablib.Databook().load(data, format=fmt, **extra_load_args)
-    except (tablib.UnsupportedFormat, KeyError, TypeError):
-        dataset = tablib.import_set(data, format=fmt, **extra_load_args)
-        dataset.title = _fit_title(title)
-        return dataset
+        return raw.decode()
+    except UnicodeDecodeError as exc:
+        msg = (
+            f"Could not read {source} as text: the data is not valid UTF-8. "
+            "Convert it to UTF-8 first, or use -f if it is a binary format."
+        )
+        raise TublubError(msg) from exc
 
 
 def _read_and_detect_stdin(
@@ -823,12 +888,21 @@ def save_dataset_file(
     extra_args: dict[str, Any],
     force_format: str | None = None,
 ) -> None:
-    """Save a Tablib dataset to a file."""
+    """Save a Tablib dataset to a file.
+
+    The data renders into memory before the output is opened, because
+    opening for writing truncates and an export can still fail on data the
+    target format cannot hold — otherwise a refused conversion would
+    destroy the very file it declined to write. Same discipline as
+    save_databook_file.
+    """
     file_format = _resolve_output_format(force_format, file_name)
 
     cfg = FORMATS.get(file_format, _DEFAULT_FMT)
+    buffer: io.BytesIO | io.StringIO = io.BytesIO() if cfg.binary else io.StringIO()
+    export_dataset(data, file_format, extra_args, file_handle=buffer)
     with _open_for_format(file_name, cfg, write=True) as fh:
-        export_dataset(data, file_format, extra_args, file_handle=fh)
+        fh.write(buffer.getvalue())
 
     print(f"Saved '{file_name}', {len(data)} records ({file_format})")
 
@@ -926,6 +1000,8 @@ def export_databook(
         if hint:
             msg += f"; {hint}"
         raise MultiSheetUnsupportedError(msg, target_format) from exc
+    except Exception as exc:
+        raise _export_error(target_format, exc) from exc
     if to_stdout and isinstance(output, str) and output and output[-1] != "\n":
         output += "\n"
     file_handle.write(output)
@@ -989,10 +1065,25 @@ def export_dataset(
     if file_handle is None:
         file_handle = _default_export_handle(target_format)
     extra_save_args = filter_args("save", extra_args, target_format)
-    output = data.export(target_format, **extra_save_args)
+    try:
+        output = data.export(target_format, **extra_save_args)
+    except Exception as exc:
+        raise _export_error(target_format, exc) from exc
     if to_stdout and isinstance(output, str) and output and output[-1] != "\n":
         output += "\n"
     file_handle.write(output)
+
+
+def _export_error(target_format: str, exc: Exception) -> TublubError:
+    """Wrap a failed export as a user-facing error.
+
+    A format's writer signals "this data will not fit" with whatever its
+    backend happened to raise, so the exception type carries nothing worth
+    branching on — only the format and the underlying message reach the
+    user.
+    """
+    msg = f"Could not export to {target_format}: {exc}"
+    return TublubError(msg)
 
 
 def _default_export_handle(

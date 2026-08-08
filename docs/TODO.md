@@ -71,3 +71,8 @@ satisfies both.
 - `--list-sheets -t json` machine-readable listing — would lift the
   `--list-sheets`/`-t` mutual exclusion; don't foreclose it, don't build it
   yet.
+- `--skip-lines` on a *single-sheet* workbook still loses the sheet
+  structure to the option fallback (decision 032 stops the multi-sheet data
+  loss only): `-l` prints the bare `rows x cols` line and `-s 0` says the
+  input has no sheet structure. No data loss — the one sheet is read and the
+  option applied — but the listing shape lies about the input.

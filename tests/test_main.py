@@ -62,6 +62,30 @@ def test_none_input():
     assert guess_file_format(None) is None
 
 
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("OUT.JSON", "json"),
+        ("Data.Csv", "csv"),
+    ],
+)
+def test_uppercase_extensions(filename, expected):
+    assert guess_file_format(Path(filename)) == expected
+
+
+def test_cli_uppercase_output_extension(sample_csv, tmp_path):
+    out = tmp_path / "OUT.JSON"
+    assert cli([str(sample_csv), str(out)]) == 0
+    assert json.loads(out.read_text())[0]["name"] == "Alice"
+
+
+def test_uppercase_extension_mismatch_warns(tmp_path, capsys):
+    p = tmp_path / "data.XLS"
+    p.write_text("name,age\nAlice,30\nBob,25\n")
+    try_load_file(p, extra_args={})
+    assert "Extension suggests xls" in capsys.readouterr().err
+
+
 # --- is_bin ---
 
 
@@ -276,6 +300,16 @@ def test_roundtrip_csv(sample_data, tmp_path):
     assert len(loaded) == len(sample_data)
 
 
+def test_failed_export_leaves_existing_file_intact(tmp_path):
+    out = tmp_path / "out.dbf"
+    out.write_text("sentinel")
+    headerless = tablib.Dataset()  # dbf cannot export a headerless dataset
+    headerless.append(["Alice", 30])
+    with pytest.raises(TublubError, match="dbf"):
+        save_dataset_file(headerless, out, extra_args={})
+    assert out.read_text() == "sentinel"
+
+
 # --- export_dataset ---
 
 
@@ -315,6 +349,13 @@ def test_export_text_to_non_tty(sample_data, tmp_path):
     with out.open("w") as fh:
         export_dataset(sample_data, "json", extra_args={}, file_handle=fh)
     assert "Alice" in out.read_text()
+
+
+def test_export_dataset_wraps_tablib_failure():
+    headerless = tablib.Dataset()
+    headerless.append(["Alice", 30])
+    with pytest.raises(TublubError, match="Could not export"):
+        export_dataset(headerless, "dbf", extra_args={}, file_handle=io.BytesIO())
 
 
 # --- parse_command_line ---
@@ -682,6 +723,23 @@ def test_binary_to_tty_is_not_the_fallback_signal():
     assert not isinstance(excinfo.value, MultiSheetUnsupportedError)
 
 
+# --- export failures ---
+
+
+def test_cli_failed_save_keeps_existing_file(sample_csv, existing_out):
+    existing_args = ["-H", "-t", "dbf", "-y", "-o", str(existing_out)]
+    with pytest.raises(SystemExit) as excinfo:
+        cli([*existing_args, str(sample_csv)])
+    assert "dbf" in str(excinfo.value)
+    assert existing_out.read_text() == "sentinel"
+
+
+def test_cli_failed_export_to_stdout_exits_cleanly(sample_csv):
+    with pytest.raises(SystemExit) as excinfo:
+        cli(["-H", "-t", "dbf", str(sample_csv)])
+    assert "Could not export" in str(excinfo.value)
+
+
 # --- load_databook_file ---
 
 
@@ -802,6 +860,77 @@ def test_csv_returns_dataset():
 def test_try_load_empty_stdin_raises():
     with pytest.raises(TublubError, match="No data received"):
         try_load_stdin(stdin=io.BytesIO(b""))
+
+
+# --- non-UTF-8 input ---
+
+LATIN1_CSV = b"id,name\n1,R\xe4ksm\xf6rg\xe5s\n"  # latin-1 "Räksmörgås"
+
+
+def test_non_utf8_stdin_raises():
+    with pytest.raises(TublubError, match="UTF-8"):
+        try_load_stdin(in_format="csv", stdin=io.BytesIO(LATIN1_CSV))
+
+
+def test_non_utf8_dataset_stdin_raises():
+    with pytest.raises(TublubError, match="UTF-8"):
+        load_dataset_stdin(in_format="csv", stdin=io.BytesIO(LATIN1_CSV))
+
+
+def test_non_utf8_file_raises(tmp_path):
+    p = tmp_path / "latin.csv"
+    p.write_bytes(LATIN1_CSV)
+    with pytest.raises(TublubError, match=r"latin\.csv"):
+        try_load_file(p, extra_args={})
+
+
+def test_cli_non_utf8_stdin_exits():
+    with pytest.raises(SystemExit) as excinfo:
+        cli(["-f", "csv", "-"], stdin=io.BytesIO(LATIN1_CSV))
+    assert "UTF-8" in str(excinfo.value)
+
+
+# --- load options on a multi-sheet input ---
+
+
+def test_skip_lines_multi_sheet_file_errors(multi_sheet_xlsx):
+    with pytest.raises(TublubError, match="--skip-lines"):
+        try_load_file(multi_sheet_xlsx, extra_args={"skip_lines": 1})
+
+
+def test_skip_lines_multi_sheet_book_helper_errors(multi_sheet_xlsx):
+    with pytest.raises(TublubError, match="--skip-lines"):
+        load_databook_file(multi_sheet_xlsx, extra_args={"skip_lines": 1})
+
+
+def test_skip_lines_multi_sheet_stdin_errors(multi_sheet_xlsx):
+    stdin = io.BytesIO(multi_sheet_xlsx.read_bytes())
+    with pytest.raises(TublubError, match="--skip-lines"):
+        try_load_stdin(extra_args={"skip_lines": 1}, stdin=stdin)
+
+
+def test_skip_lines_single_sheet_still_loads(one_sheet_xlsx):
+    loaded = try_load_file(one_sheet_xlsx, extra_args={"skip_lines": 1})
+    assert isinstance(loaded, tablib.Dataset)
+    assert len(loaded) == 1
+
+
+def test_skip_lines_csv_unaffected(sample_csv):
+    loaded = try_load_file(sample_csv, extra_args={"skip_lines": 1})
+    assert isinstance(loaded, tablib.Dataset)
+    assert len(loaded) == 1
+
+
+def test_cli_list_sheets_with_skip_lines_exits(multi_sheet_xlsx):
+    with pytest.raises(SystemExit) as excinfo:
+        cli(["-l", "--skip-lines", "1", str(multi_sheet_xlsx)])
+    assert "--skip-lines" in str(excinfo.value)
+
+
+def test_cli_sheet_selection_with_skip_lines_exits(multi_sheet_xlsx):
+    with pytest.raises(SystemExit) as excinfo:
+        cli(["-s", "1", "--skip-lines", "1", str(multi_sheet_xlsx)])
+    assert "--skip-lines" in str(excinfo.value)
 
 
 # --- parse_command_line: multi-input mode ---
@@ -1035,6 +1164,12 @@ def test_unknown_format_exits(tmp_path):
     bogus.write_bytes(b"\x00\x01\x02not-a-known-format")
     with pytest.raises(SystemExit):
         cli(["--list-sheets", str(bogus)])
+
+
+def test_headerless_input_reports_columns(sample_csv, capsys):
+    rc = cli(["--list-sheets", "-H", str(sample_csv)])
+    assert rc == 0
+    assert capsys.readouterr().out == "3 rows x 3 cols\n"
 
 
 def test_combined_with_output_rejected(sample_csv, tmp_path):
