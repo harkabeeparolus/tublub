@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-08-08
+
 ### Fixed
 
 * A failed save no longer destroys the output file. The data is rendered in
