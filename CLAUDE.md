@@ -134,6 +134,9 @@ Not every departure needs a decision entry: a roadmap sub-task that turns out un
   restore is exact and cannot leave a stray edit behind. `git checkout` /
   `git restore <file>` on a file holding *unstashed* work discards it — and stash
   cannot get it back afterwards, it only prevents the loss.
+- ty type-checks `tests/` too: narrow `try_load_*` results with
+  `assert isinstance(loaded, tablib.Dataset)` before touching Dataset
+  attributes (the existing tests' idiom).
 - Argparse unit tests: call `parse_command_line(argv)` directly and assert on the returned `args`.
 - CLI integration tests: call `cli([...])` with an argv list, read `capsys.readouterr().out`.
 - Don't monkeypatch `sys` globals — the IO edges take injection params (decision 020):

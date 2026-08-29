@@ -61,7 +61,10 @@ There is deliberately **no `databook: bool` capability flag** — see below.
 ### The `TublubError` boundary
 Library helpers raise `TublubError` for user-facing problems; only the
 `_run_*` entry points (called by `cli()`) catch it and convert to
-`sys.exit(msg)`. This keeps every helper reusable outside the CLI. For type
+`sys.exit(msg)`. This keeps every helper reusable outside the CLI.
+`OSError` gets the same treatment one level up: `cli()` converts it to a
+one-line exit message (see [`decisions.md` 033](decisions.md)), while
+helpers let it propagate untouched for Python callers. For type
 narrowing, prefer an explicit `if x is None: raise TublubError(...)` or a
 helper with an already-narrow return type over `assert`/`cast` (S101 forbids
 `assert` in `src/`).

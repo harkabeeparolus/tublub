@@ -43,11 +43,10 @@ file named by **-o**, or to standard output.
 Both formats are normally detected rather than declared. The input format is
 detected from the file contents, falling back to the file extension; when the
 two disagree, **tublub** says so on standard error and trusts the contents.
-The output format comes from the *OUTFILE* extension, or from **-t**, or —
-printing to a terminal with neither — defaults to a rendered table
-(the `cli` format). Use **-f** and **-t** to override either end, for example
-on a `.txt` file or a single-column CSV, where content detection has nothing
-to go on.
+The output format comes from **-t**, or from the *OUTFILE* extension; with
+neither, the output is a rendered table (the `cli` format). Use **-f** and
+**-t** to override either end, for example on a `.txt` file or a
+single-column CSV, where content detection has nothing to go on.
 
 Printing a binary format to a terminal is refused rather than garbling the
 screen; redirect it or name an output file. Run **tublub --list-formats** for
@@ -65,13 +64,13 @@ the formats the installed Tablib supports.
 :   List the available file formats and exit.
 
 **--dialect** *DIALECT*
-:   For CSV, the input and output dialect: `excel` or `unix`.
+:   For CSV, the input and output dialect: `excel`, `excel-tab`, or `unix`.
 
 **-d**, **--delimiter** *C*
-:   For CSV, the input and output field delimiter.
+:   For CSV, the input and output field delimiter (a single character).
 
 **-q**, **--quotechar** *C*
-:   For CSV, the input and output quote character.
+:   For CSV, the input and output quote character (a single character).
 
 ## Input options
 
@@ -105,8 +104,8 @@ the formats the installed Tablib supports.
 ## Output options
 
 **-t**, **--to** *FMT*
-:   Output format. Defaults to the *OUTFILE* extension, or to a rendered
-    table when printing to a terminal.
+:   Output format. Overrides the *OUTFILE* extension; with neither, the
+    output is a rendered table.
 
 **-o**, **--output** *FILE*
 :   Write to *FILE*. With **-o**, every positional argument is an input, and
@@ -272,10 +271,10 @@ standard input is not a terminal:
 :   Success.
 
 1
-:   The run failed — an unreadable or undetectable input, no data loaded, an
-    output format that can not hold the selected sheets, a refused overwrite,
-    or a binary format aimed at a terminal. The reason is printed on standard
-    error.
+:   The run failed — an unreadable or undetectable input, an unwritable
+    output path, no data loaded, an output format that can not hold the
+    selected sheets, a refused overwrite, or a binary format aimed at a
+    terminal. The reason is printed on standard error.
 
 2
 :   The command line itself was rejected, for example an unknown flag or a

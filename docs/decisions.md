@@ -1099,3 +1099,32 @@ out of an option that works fine on every single-sheet input; erroring only
 when the retry proves sheets would be lost keeps the flag maximally useful
 while making the loss impossible to hit silently. The retry costs one extra
 parse only on the path that previously ended in silent loss.
+
+---
+
+### 033. OS errors are converted to clean messages at the CLI boundary
+*2026-08-29 · Accepted*
+
+**Context.** 003 routes user-facing problems through `TublubError`, which
+only the CLI layer converts to `sys.exit(msg)`. But the operating system
+reports its own class of user-facing problems — an unreadable input file, an
+output path whose directory does not exist, a directory where a file was
+expected — and those escaped as raw `OSError` tracebacks (`IsADirectoryError`,
+`FileNotFoundError`, `PermissionError`), the same symptom the 0.8.1 release
+fixed for non-UTF-8 input. The parse-time `is_file()` check cannot close this:
+readability is only known at open time, and output paths are not checked at
+all.
+
+**Decision.** `cli()` wraps its mode dispatch in one `except OSError` and
+exits with `_os_error_message(exc)` — "Cannot open '<path>': <strerror>" when
+the error names a file, a generic input/output line otherwise. Library
+helpers do not catch or wrap `OSError`; a Python caller keeps the real
+exception, exactly as 003 keeps `TublubError` catchable.
+
+**Why.** The OS is hit in many places (open, read, the final write), so
+converting at each call site would sprinkle the same handler everywhere and
+inevitably miss one; the boundary already exists and catches everything below
+it, future call sites included. Reusing the OS's own `strerror` instead of
+composing per-case messages follows the same instinct as 008's "ask, don't
+tabulate": the kernel already names the failure better than a hand-rolled
+message table would.

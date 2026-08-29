@@ -1,5 +1,6 @@
 """Tests for tublub.main."""
 
+import argparse
 import io
 import json
 import re
@@ -8,8 +9,8 @@ from pathlib import Path
 import pytest
 import tablib
 
+from tublub import __version__
 from tublub.main import (
-    FORMATS,
     XLSX_TITLE_LIMIT,
     MultiSheetUnsupportedError,
     TublubError,
@@ -89,7 +90,7 @@ def test_uppercase_extension_mismatch_warns(tmp_path, capsys):
 # --- is_bin ---
 
 
-@pytest.mark.parametrize("fmt", sorted(k for k, v in FORMATS.items() if v.binary))
+@pytest.mark.parametrize("fmt", ["xlsx", "xls", "dbf", "ods"])
 def test_binary_formats(fmt):
     assert is_bin(fmt) is True
 
@@ -399,9 +400,10 @@ def test_nonexistent_file_exits():
         parse_command_line(["/no/such/file.csv"])
 
 
-def test_invalid_format_exits(sample_csv):
+def test_invalid_format_exits(sample_csv, capsys):
     with pytest.raises(SystemExit):
         parse_command_line(["-t", "bogus", str(sample_csv)])
+    assert "use one of: " + " ".join(get_formats()) in capsys.readouterr().err
 
 
 def test_list_formats_with_file_exits(sample_csv):
@@ -437,6 +439,15 @@ def test_delimiter_extra_arg(sample_csv):
     assert extra["delimiter"] == ";"
 
 
+@pytest.mark.parametrize("flag", ["-d", "-q"])
+@pytest.mark.parametrize("value", ["ab", ""])
+def test_multichar_csv_option_rejected(sample_csv, flag, value, capsys):
+    """The csv module wants exactly one character; reject early, not mid-load."""
+    with pytest.raises(SystemExit):
+        parse_command_line([flag, value, str(sample_csv)])
+    assert "single character" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize(
     ("flag", "key"),
     [("-H", "headers"), ("--no-xlsx-optimize", "read_only")],
@@ -454,13 +465,14 @@ def test_store_const_flags(sample_csv, flag, key):
 
 def test_returns_parser():
     parser = build_argument_parser()
-    assert isinstance(parser, type(build_argument_parser()))
+    assert isinstance(parser, argparse.ArgumentParser)
 
 
 def test_version_flag(capsys):
     parser = build_argument_parser()
     with pytest.raises(SystemExit, match="0"):
         parser.parse_args(["--version"])
+    assert __version__ in capsys.readouterr().out
 
 
 # --- load_dataset_stdin ---
@@ -585,7 +597,7 @@ def test_qualified_collision_falls_back_to_numeric_suffix():
     assert _unique_titles(entries) == ["data_x", "data_x_2"]
 
 
-def test_unqualifiable_entry_falls_back_to_numeric_suffix(capsys):
+def test_unqualifiable_entry_keeps_its_stem(capsys):
     # A path with no parent name qualifies to its own stem.
     entries = [("Sales", "Sales"), ("Sales", "dir_Sales")]
     assert _unique_titles(entries) == ["Sales", "dir_Sales"]
@@ -890,6 +902,17 @@ def test_cli_non_utf8_stdin_exits():
     assert "UTF-8" in str(excinfo.value)
 
 
+BOM_CSV = "name,city\nRäksmörgås,Stockholm\n".encode("utf-8-sig")
+
+
+def test_utf8_bom_stripped_from_header():
+    """Excel writes UTF-8 CSVs with a BOM; it must not leak into the header."""
+    ds = try_load_stdin(stdin=io.BytesIO(BOM_CSV))
+    assert isinstance(ds, tablib.Dataset)
+    assert ds.headers == ["name", "city"]
+    assert ds[0][0] == "Räksmörgås"
+
+
 # --- load options on a multi-sheet input ---
 
 
@@ -1183,9 +1206,12 @@ def test_combined_with_format_rejected(sample_csv):
         parse_command_line(["--list-sheets", "-t", "csv", str(sample_csv)])
 
 
-def test_list_sheets_combined_with_list_formats_rejected(sample_csv):
+def test_list_sheets_combined_with_list_formats_rejected(capsys):
+    # No input file: with one, the --list-formats-with-filenames rule fires first.
     with pytest.raises(SystemExit):
-        parse_command_line(["--list-sheets", "--list-formats", str(sample_csv)])
+        parse_command_line(["--list-sheets", "--list-formats"], stdin_isatty=True)
+    err = capsys.readouterr().err
+    assert "Can not combine --list-sheets with --list-formats" in err
 
 
 def test_list_sheets_no_input_rejected():
@@ -1222,6 +1248,24 @@ def test_mixed_comma_stays_literal(multi_sheet_xlsx):
 def test_title_with_comma_stays_whole(multi_sheet_xlsx):
     args, _ = parse_command_line(["-s", "Revenue, EMEA", str(multi_sheet_xlsx)])
     assert args.sheets == ["Revenue, EMEA"]
+
+
+@pytest.mark.parametrize("selector", ["a,,b", "name:a,,b", "Users,"])
+def test_non_selector_piece_stays_literal(multi_sheet_xlsx, selector):
+    """A non-selector piece makes the occurrence a title, blank pieces and all."""
+    args, _ = parse_command_line(["-s", selector, str(multi_sheet_xlsx)])
+    assert args.sheets == [selector]
+
+
+def test_name_prefix_selects_comma_title(tmp_path, capsys):
+    book = [
+        {"title": "a,,b", "data": [{"x": 1}]},
+        {"title": "other", "data": [{"x": 2}]},
+    ]
+    p = tmp_path / "commas.json"
+    p.write_text(json.dumps(book))
+    cli(["-s", "name:a,,b", "-t", "csv", str(p)])
+    assert capsys.readouterr().out.splitlines() == ["x", "1"]
 
 
 @pytest.mark.parametrize("selector", ["", ",", "0,", " , "])
@@ -1282,9 +1326,10 @@ def test_sheet_combined_with_list_sheets_rejected(multi_sheet_xlsx):
         parse_command_line(["-s", "0", "--list-sheets", str(multi_sheet_xlsx)])
 
 
-def test_sheet_combined_with_list_formats_rejected():
+def test_sheet_combined_with_list_formats_rejected(capsys):
     with pytest.raises(SystemExit):
-        parse_command_line(["-s", "0", "--list-formats"])
+        parse_command_line(["-s", "0", "--list-formats"], stdin_isatty=True)
+    assert "Can not combine --sheet with --list-formats" in capsys.readouterr().err
 
 
 def test_stdin_explicit_accepted():
@@ -1772,9 +1817,11 @@ def test_all_sheets_combined_with_list_sheets_rejected(multi_sheet_xlsx):
         parse_command_line(["--all-sheets", "--list-sheets", str(multi_sheet_xlsx)])
 
 
-def test_all_sheets_combined_with_list_formats_rejected():
+def test_all_sheets_combined_with_list_formats_rejected(capsys):
     with pytest.raises(SystemExit):
-        parse_command_line(["--all-sheets", "--list-formats"])
+        parse_command_line(["--all-sheets", "--list-formats"], stdin_isatty=True)
+    err = capsys.readouterr().err
+    assert "Can not combine --all-sheets with --list-formats" in err
 
 
 def test_stdin_keeps_every_sheet(multi_sheet_xlsx, capsys):
@@ -1938,7 +1985,7 @@ def test_fallback_never_suggests_all_sheets(multi_sheet_xlsx, capsys):
 
 
 def test_save_csv_falls_back_cleanly(multi_sheet_xlsx, tmp_path, capsys):
-    """The whole-book attempt truncates the target; the fallback rewrites it."""
+    """The whole-book attempt fails before opening; the fallback writes the file."""
     out_file = tmp_path / "out.csv"
     rc = cli(["-o", str(out_file), str(multi_sheet_xlsx)], stderr_isatty=False)
     captured = capsys.readouterr()
@@ -2277,6 +2324,24 @@ def test_stdout_output_unaffected(sample_csv, capsys, flags):
     rc = cli([*flags, "-t", "json", str(sample_csv)], stdin_isatty=False)
     assert rc == 0
     assert "Alice" in capsys.readouterr().out
+
+
+# --- OS errors reported without a traceback ---
+
+
+def test_outfile_is_directory_exits_cleanly(sample_csv, tmp_path):
+    out_dir = tmp_path / "out.json"
+    out_dir.mkdir()
+    with pytest.raises(SystemExit) as excinfo:
+        cli(["-y", str(sample_csv), str(out_dir)])
+    assert str(excinfo.value) == f"Cannot open '{out_dir}': Is a directory"
+
+
+def test_outfile_missing_parent_exits_cleanly(sample_csv, tmp_path):
+    out_file = tmp_path / "no" / "such" / "out.json"
+    with pytest.raises(SystemExit) as excinfo:
+        cli([str(sample_csv), str(out_file)])
+    assert str(excinfo.value) == f"Cannot open '{out_file}': No such file or directory"
 
 
 # --- single-input sheet titling ---

@@ -18,55 +18,11 @@ because nothing else records them:
 
 ---
 
-## Don't clobber an existing output file silently — DONE
-
-Shipped (unreleased): `-y/--yes` and `-n/--no-clobber`, plus a default that
-asks at a terminal (question on stderr, default no) and refuses anywhere
-else. Decision 025 settles the two questions the sketch left open, in both
-cases against its own leaning: the non-terminal default refuses rather than
-overwriting — the accident that prompted this was an agent, and an agent is
-not a terminal, so a prompt-only guard would have caught nothing — and every
-refusal exits non-zero rather than treating "nothing to do" as success.
-
-## A failed multi-sheet save leaves the output file empty — DONE
-
-Shipped (unreleased): `save_databook_file` renders the workbook into memory
-and only then opens the output, so a format that cannot hold the sheets leaves
-the file untouched. Decision 026 supersedes the sketch's mechanism — book
-capability cannot be decided before opening, because an empty
-`Databook().export()` raises `IndexError` for xls/xlsx rather than
-`UnsupportedFormat`, so the real export has to be attempted (008) and buffered.
-The sketch's ban on temp-file-and-rename stands.
-
-## `try_load_*` should resolve the input format once — DONE
-
-Shipped (unreleased): `try_load_file` reads the file once, resolves the
-format once, and tries both shapes on the same payload through the same
-handshake helper as `try_load_stdin`, so the mismatch warning fires once
-per loaded input. Decision 027 picks this over the sketch's other option
-(short-circuiting detection under `-f`), which would have silenced 004's
-warning in exactly the wrong-extension case it exists for.
-
-## Title a single-input sheet after its input file — DONE
-
-Shipped (unreleased): a payload that loads with no sheet structure is titled
-after its source in `_import_any` — a file by its stem, stdin by the name
-`stdin` — while observed sheet titles stay verbatim. Decision 028 answers the
-sketch's open stdin question (`stdin`, since keeping `Tablib Dataset` keeps a
-Tablib internal inside the user's file, which 019 forbids) and supersedes its
-placement wording: titling in the single-input save/export path would have left
-`--all-sheets` on a structureless input writing the placeholder, and 017 makes
-that the identity modifier, so the load-time handshake is the only place that
-satisfies both.
-
 ## Smaller multi-sheet extensions
 
 - `book.xlsx::Sheet1` per-input selection — the `::` separator stays
   reserved for this (and is why `__` was chosen for expansion titles).
   Unlocks selection in multi-input mode.
-- Index ranges (`--sheet 0-4`) — DONE, shipped (unreleased): cut-style `N-M`
-  and `N-` per decision 030 (no `-M` shape, decreasing ranges are a parse
-  error, out-of-range errors rather than clamps).
 - `--exclude-sheet NAME` — "everything but the Notes sheet".
 - `--list-sheets -t json` machine-readable listing — would lift the
   `--list-sheets`/`-t` mutual exclusion; don't foreclose it, don't build it
@@ -76,3 +32,69 @@ satisfies both.
   loss only): `-l` prints the bare `rows x cols` line and `-s 0` says the
   input has no sheet structure. No data loss — the one sheet is read and the
   option applied — but the listing shape lies about the input.
+
+---
+
+The three sections below are the unfixed findings from the 2026-08-31 code
+audit (the fixed ones landed with decision 033). Each needs its own analysis
+before acting — some may turn out to be deliberate or not worth the churn.
+
+## Release and CI plumbing
+
+- `python-publish.yml` re-implements `just build` (build_man, then
+  `uv build`) instead of invoking the recipe, so the release path can drift
+  from the Justfile — `RELEASING.md` already warns that a bare `uv build`
+  ships a wheel with no man page.
+- Nothing checks the release tag against the `pyproject.toml` version at
+  publish time; a mis-tagged release publishes the wrong version.
+  `RELEASING.md` leaves that invariant manual.
+- `tests.yml` runs the full `just ci` (lint + typecheck + test) on every
+  matrix Python, but lint/format/typecheck results do not vary by
+  interpreter. Also no `timeout-minutes` and no cancel-in-progress
+  concurrency group.
+- The Justfile runs mypy on `src` only (ty checks the whole tree, so
+  `tests/` is never mypy-checked), and `--ignore-missing-imports` is a
+  command-line flag rather than `[tool.mypy]` config, so a bare `mypy` or
+  editor run uses different settings than CI.
+- `pyproject.toml` has no `Programming Language :: Python` or
+  `Development Status` classifiers, so PyPI advertises no supported
+  versions despite the CI matrix.
+- `zizmor.yml` triggers on `pull_request: branches: ["**"]` while
+  `tests.yml` uses a bare `pull_request:` — harmless today, easy to
+  diverge.
+
+## Test-suite gaps
+
+- `-q/--quotechar` and `--dialect` have parse-level tests only; nothing
+  drives them through a real load or save. `-d/--delimiter` is tested on
+  load but not on save, though all three sit in csv's `save_args`.
+- No test asserts an exit code (`excinfo.value.code`), although the manual
+  documents 1 vs 2 as part of the interface.
+- ODS appears in no test at all, though README and the manual promise
+  multi-sheet ODS output; the HTML/RST book-export claims are likewise
+  untested (both formats do have `export_book` in tablib).
+- `--no-xlsx-optimize` is parse-level only — never driven through a real
+  XLSX load.
+- No `[tool.pytest.ini_options]`: no `testpaths`, no `--strict-markers`,
+  and no `filterwarnings = ["error"]`, so a regression of the openpyxl
+  "Title is more than 31 characters" warning (fixed in 0.5.0) would pass
+  silently.
+- `print_databook`'s heading-only branch (a selected sheet whose body
+  renders empty) is never hit by any test.
+
+## Small behavior and docs quirks
+
+- `_is_int_token` accepts every `int()` spelling — `1_0` selects index 10,
+  `+1` index 1, padded whitespace parses — looser than 030's bare-decimal
+  rule for range endpoints. Any tightening must keep `-s -1` erroring as
+  index -1 (the guarantee 030 leans on), and `name:` already rescues titles
+  shaped like these.
+- `-H/--no-headers` is silently dropped for xlsx/xls/ods input even though
+  tablib's `import_set` accepts `headers=` there. The manual scopes the
+  flag to CSV/TSV, so this is a capability question (widen `load_args`?)
+  rather than a doc bug — but the silent drop is invisible to users.
+- The manual's SHEET SELECTION text says indexed lines are selectable "by
+  index or by title"; empty-titled sheets (reachable by index only) and
+  duplicate titles (an ambiguity error) are undocumented exceptions.
+- `CHANGELOG.md` declares Keep a Changelog but defines no link references,
+  so every `[X.Y.Z]` heading renders as literal brackets.

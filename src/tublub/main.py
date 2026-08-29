@@ -110,13 +110,16 @@ def cli(
 
     _check_outfile_clobber(args, stdin_isatty=stdin_isatty, prompt_input=prompt_input)
 
-    if args.list_sheets:
-        return _run_list_sheets(args, extra_args, stdin=stdin)
-    if args.sheets is not None or args.all_sheets:
-        return _run_sheets(args, extra_args, stdin=stdin)
-    if len(args.infiles) >= _MIN_DATABOOK_INPUTS:
-        return _run_databook(args, extra_args)
-    return _run_single(args, extra_args, stderr_isatty=stderr_isatty, stdin=stdin)
+    try:
+        if args.list_sheets:
+            return _run_list_sheets(args, extra_args, stdin=stdin)
+        if args.sheets is not None or args.all_sheets:
+            return _run_sheets(args, extra_args, stdin=stdin)
+        if len(args.infiles) >= _MIN_DATABOOK_INPUTS:
+            return _run_databook(args, extra_args)
+        return _run_single(args, extra_args, stderr_isatty=stderr_isatty, stdin=stdin)
+    except OSError as exc:
+        sys.exit(_os_error_message(exc))
 
 
 def _check_outfile_clobber(
@@ -689,7 +692,7 @@ def _detect_format_from_bytes(raw: bytes) -> str | None:
     fmt = tablib.detect_format(raw)
     if fmt is None:
         try:
-            text = raw.decode()
+            text = raw.decode("utf-8-sig")
         except UnicodeDecodeError:
             return None
         fmt = tablib.detect_format(text)
@@ -844,10 +847,12 @@ def _decode_text(raw: bytes, source: str) -> str:
 
     Every text format Tablib parses wants str, so a mis-encoded byte in a
     CSV would otherwise surface as a decoder traceback naming a byte
-    offset rather than the input.
+    offset rather than the input. utf-8-sig reads plain UTF-8 unchanged
+    and additionally drops the byte order mark Excel puts on CSV exports,
+    which would otherwise leak into the first header name.
     """
     try:
-        return raw.decode()
+        return raw.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         msg = (
             f"Could not read {source} as text: the data is not valid UTF-8. "
@@ -1086,6 +1091,20 @@ def _export_error(target_format: str, exc: Exception) -> TublubError:
     return TublubError(msg)
 
 
+def _os_error_message(exc: OSError) -> str:
+    """Format a file-system failure the way shell tools do, sans traceback.
+
+    An unreadable input, an output path whose parent is missing, or an
+    output that turns out to be a directory all surface here. The OS is
+    hit at many places (open, read, the final write), so the conversion
+    happens once at the CLI boundary rather than at every call site;
+    library callers keep the original OSError.
+    """
+    if exc.filename:
+        return f"Cannot open '{exc.filename}': {exc.strerror}"
+    return f"Input/output error: {exc.strerror or exc}"
+
+
 def _default_export_handle(
     target_format: str, stdout: TextIO | None = None
 ) -> IO[str] | IO[bytes]:
@@ -1203,17 +1222,26 @@ def _cook_one_occurrence(parser: argparse.ArgumentParser, occ: str) -> list[str]
     """Split one --sheet occurrence into tokens (see _cook_sheet_tokens).
 
     A piece counts as a selector when it is an integer or a cut-style
-    range. A decreasing range is a static defect in the command line and
-    errors here, before any input is read.
+    range. Any non-selector piece makes the whole occurrence one literal
+    title token — blank pieces and all, so a title like "a,,b" stays
+    selectable. An occurrence of only selectors and blanks has a selector
+    missing ("0," or ","), which is an error. A decreasing range is a
+    static defect in the command line and errors here, before any input
+    is read.
     """
     pieces = [p.strip() for p in occ.split(",")]
+    if any(p and not _is_selector_token(p) for p in pieces):
+        return [occ]
     if not all(pieces):
         parser.error("no sheet selector given")
-    if not all(_is_int_token(p) or _parse_range_token(p) is not None for p in pieces):
-        return [occ]
     for piece in pieces:
         _reject_decreasing(parser, piece)
     return pieces
+
+
+def _is_selector_token(token: str) -> bool:
+    """Return True if the token is an index or range selector, not a title."""
+    return _is_int_token(token) or _parse_range_token(token) is not None
 
 
 def _reject_decreasing(parser: argparse.ArgumentParser, piece: str) -> None:
@@ -1363,6 +1391,15 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         if not f.is_file():
             parser.error(f"Input file {f} does not exist.")
 
+    # The csv module accepts exactly one character; reject early, not mid-load.
+    single_char_flags = (
+        ("-d/--delimiter", args.delimiter),
+        ("-q/--quotechar", args.quotechar),
+    )
+    for flag, value in single_char_flags:
+        if value is not None and len(value) != 1:
+            parser.error(f"{flag} must be a single character")
+
     _check_known_format(parser, args.out_format, "format")
     _check_known_format(parser, args.in_format, "input format")
 
@@ -1372,7 +1409,7 @@ def _check_known_format(
 ) -> None:
     """parser.error (which exits) if fmt is set but not a known tablib format."""
     if fmt and fmt not in get_formats():
-        parser.error(f"Invalid {label} {fmt}, use one of: {get_formats()}")
+        parser.error(f"Invalid {label} {fmt}, use one of: {' '.join(get_formats())}")
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -1394,13 +1431,19 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--dialect",
         metavar="DIALECT",
         choices=csv.list_dialects(),
-        help="for CSV, input/output dialect {excel, unix}",
+        help=f"for CSV, input/output dialect {{{', '.join(csv.list_dialects())}}}",
     )
     parser.add_argument(
-        "-d", "--delimiter", metavar="C", help="for CSV, input/output delimiter"
+        "-d",
+        "--delimiter",
+        metavar="C",
+        help="for CSV, input/output delimiter (one character)",
     )
     parser.add_argument(
-        "-q", "--quotechar", metavar="C", help="for CSV, input/output quote char"
+        "-q",
+        "--quotechar",
+        metavar="C",
+        help="for CSV, input/output quote char (one character)",
     )
 
     input_group = parser.add_argument_group(title="input options")

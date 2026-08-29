@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Fixed
+
+* A UTF-8 byte order mark at the start of a text input — Excel's default when
+  exporting CSV — is stripped instead of leaking into the first column header.
+* An unreadable input file or an unwritable output path (a missing directory,
+  or a directory where a file was expected) is reported as a one-line error
+  instead of a Python traceback.
+* `-d`/`--delimiter` and `-q`/`--quotechar` values must be a single character,
+  as CSV requires; a longer value is now rejected up front where it used to
+  crash with a traceback while reading CSV input.
+* A sheet title containing an empty comma piece (like `a,,b`) is selectable
+  again: a `--sheet` argument with any piece that is not an index or range is
+  one literal title, as documented, so the `name:` escape hatch works for
+  every title.
+* The "Invalid format" error lists the available formats the way
+  `--list-formats` does, instead of as a Python tuple.
+* `--dialect` has always accepted `excel-tab` as well; the help text and
+  manual now say so.
+
 ## [0.8.1] - 2026-08-08
 
 ### Fixed

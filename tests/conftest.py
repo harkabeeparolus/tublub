@@ -186,7 +186,7 @@ def untitled_sheets_json(tmp_path):
 def empty_title_json(tmp_path):
     """Write a JSON workbook with an empty-titled sheet and a named one."""
     return _write_json_book(
-        tmp_path / "untitled.json",
+        tmp_path / "mixed_titles.json",
         [
             ("", [{"name": "Alice"}]),
             ("named", [{"name": "Bob"}]),
