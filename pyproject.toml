@@ -10,9 +10,11 @@ authors = [
 ]
 keywords = ["tablib", "csv", "tsv", "excel", "xlsx"]
 classifiers = [
-  "Intended Audience :: Information Technology",
+  "Development Status :: 4 - Beta",
   "Environment :: Console",
+  "Intended Audience :: Information Technology",
   "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
   "Topic :: Text Processing",
   "Topic :: Utilities",
 ]
@@ -47,6 +49,14 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 wheel-exclude = ["**/.gitkeep"]
 data = { data = "data" }
+
+[tool.mypy]
+files = ["src", "tests"]
+
+# Tablib ships no py.typed marker; only its imports go unchecked.
+[[tool.mypy.overrides]]
+module = "tablib.*"
+ignore_missing_imports = true
 
 [tool.ruff.lint]
 select = ["ALL"]

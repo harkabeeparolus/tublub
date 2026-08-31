@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Changed
+
+* The PyPI listing now declares development status (Beta) and Python 3
+  support.
+
 ### Fixed
 
 * A UTF-8 byte order mark at the start of a text input — Excel's default when

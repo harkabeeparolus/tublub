@@ -35,33 +35,25 @@ because nothing else records them:
 
 ---
 
-The three sections below are the unfixed findings from the 2026-08-31 code
-audit (the fixed ones landed with decision 033). Each needs its own analysis
-before acting — some may turn out to be deliberate or not worth the churn.
+The three sections below came out of the 2026-08-31 code audit (the fixes
+that landed immediately did so with decision 033). Each open item needs its
+own analysis before acting — some may turn out to be deliberate or not worth
+the churn.
 
-## Release and CI plumbing
+## Release and CI plumbing — DONE
 
-- `python-publish.yml` re-implements `just build` (build_man, then
-  `uv build`) instead of invoking the recipe, so the release path can drift
-  from the Justfile — `RELEASING.md` already warns that a bare `uv build`
-  ships a wheel with no man page.
-- Nothing checks the release tag against the `pyproject.toml` version at
-  publish time; a mis-tagged release publishes the wrong version.
-  `RELEASING.md` leaves that invariant manual.
-- `tests.yml` runs the full `just ci` (lint + typecheck + test) on every
-  matrix Python, but lint/format/typecheck results do not vary by
-  interpreter. Also no `timeout-minutes` and no cancel-in-progress
-  concurrency group.
-- The Justfile runs mypy on `src` only (ty checks the whole tree, so
-  `tests/` is never mypy-checked), and `--ignore-missing-imports` is a
-  command-line flag rather than `[tool.mypy]` config, so a bare `mypy` or
-  editor run uses different settings than CI.
-- `pyproject.toml` has no `Programming Language :: Python` or
-  `Development Status` classifiers, so PyPI advertises no supported
-  versions despite the CI matrix.
-- `zizmor.yml` triggers on `pull_request: branches: ["**"]` while
-  `tests.yml` uses a bare `pull_request:` — harmless today, easy to
-  diverge.
+Shipped (unreleased): `python-publish.yml` checks the release tag against
+the `pyproject.toml` version, runs `just ci`, and builds with `just build`
+instead of re-implementing it; `tests.yml` gained `timeout-minutes` and a
+cancel-in-progress concurrency group; mypy config moved to `[tool.mypy]`
+(covering `tests/`, with a per-module ignore for tablib only); Beta and
+Python 3 classifiers added; `zizmor.yml` triggers normalized to match
+`tests.yml`. Two findings resolved as deliberate, no decision entry (CI
+tightening is not architecture): the matrix keeps running full `just ci`
+because typecheck results vary by interpreter and the duplicated ruff run
+costs about a second, and per-version Python classifiers were declined
+because `requires-python` already advertises the floor and a version list
+rots.
 
 ## Test-suite gaps
 

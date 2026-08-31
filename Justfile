@@ -18,7 +18,7 @@ lint_check:
 
 # Run type checking (mypy + ty)
 typecheck:
-    uv run mypy --ignore-missing-imports src
+    uv run mypy
     uv run ty check
 
 # Run tests (pytest)

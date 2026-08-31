@@ -28,20 +28,29 @@ jobs:
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: false
-      
+
+      - name: Check release tag matches project version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="v$(uv version --short)"
+          if [ "$TAG" != "$version" ]; then
+            echo "Release tag $TAG does not match project version $version" >&2
+            exit 1
+          fi
+
       - name: Install pandoc
         run: sudo apt-get update && sudo apt-get install -y pandoc
 
       - name: Install just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
 
-      - name: Build man page
-        run: just build_man
+      - name: Run checks
+        run: just ci
 
       - name: Build release distributions
-        run: |
-          uv build
-      
+        run: just build
+
       - name: Upload distributions
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

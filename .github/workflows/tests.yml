@@ -11,13 +11,21 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        # Oldest supported (requires-python) and latest stable
+        # Oldest supported (requires-python) and latest stable. Both run the
+        # full `just ci`: typecheck results vary by interpreter (mypy and ty
+        # check against the running Python's stdlib), and the one duplicated
+        # piece, ruff, costs about a second.
         python-version: ["3.10", "3.14"]
 
     steps:

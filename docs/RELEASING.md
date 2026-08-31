@@ -23,13 +23,15 @@ worked examples.
 6. **Stop at the draft.** The maintainer reviews and publishes manually.
    Publishing is the trigger: `.github/workflows/python-publish.yml` runs on
    `release: published` and uploads to PyPI via trusted publishing. A draft
-   fires nothing.
+   fires nothing. The workflow fails before building unless the release tag
+   equals `v` plus the `pyproject.toml` version, so a mis-tagged release
+   publishes nothing; it also runs the full `just ci` first.
 
-Nothing here builds the man page by hand: the publish workflow installs pandoc
-and runs `just build_man` before `uv build`, and it stamps the page with the
-version from `pyproject.toml`, so step 2 is what sets it. To build a
-distribution locally, use `just build` (needs pandoc) rather than a bare
-`uv build`, which would ship a wheel with no man page.
+Nothing here builds the man page by hand: the publish workflow runs
+`just build`, which stamps the page with the version from `pyproject.toml`,
+so step 2 is what sets it. To build a distribution locally, use `just build`
+(needs pandoc) rather than a bare `uv build`, which would ship a wheel with
+no man page.
 
 ## Troubleshooting
 

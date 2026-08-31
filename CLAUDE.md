@@ -53,6 +53,8 @@ A plan or implementation review may find a `docs/TODO.md` task's spec wrong; rec
 
 Not every departure needs a decision entry: a roadmap sub-task that turns out unnecessary or already shipped is just a note in the `— DONE` summary (the multi-sheet roadmap's dropped fixtures task and declined flag table, both still noted in `docs/TODO.md`). Reserve entries for real spec revisions.
 
+CI and tooling-only changes (workflows, `Justfile`, type-checker config) are neither user-facing nor architectural: no `CHANGELOG.md` entry and no decision entry — rationale goes in a workflow comment and the `docs/TODO.md` `— DONE` summary. What PyPI users see (classifiers, metadata) *is* user-facing.
+
 ## Conventions
 
 - Print statements are allowed (`T20` ignored in Ruff config) since this is a CLI tool.
@@ -74,6 +76,9 @@ Not every departure needs a decision entry: a roadmap sub-task that turns out un
   `persist-credentials: false`.
 - Anything under `.github/` must pass `just audit` — zizmor checks
   `dependabot.yml` too (e.g. requires `cooldown` on update entries).
+- A GitHub context in a `run:` block must go through `env:` (`env: TAG: ${{ ...
+  }}`, then `"$TAG"` in the script), never inline `${{ }}` — zizmor's
+  `template-injection` audit is a high-severity failure otherwise.
 - Local zizmor runs offline; `zizmor.yml` CI runs the online audits and
   uploads SARIF to code scanning, so CI can find things local runs don't.
 - Dependabot bumps action SHAs + version comments and `uv.lock` (grouped,
@@ -134,7 +139,7 @@ Not every departure needs a decision entry: a roadmap sub-task that turns out un
   restore is exact and cannot leave a stray edit behind. `git checkout` /
   `git restore <file>` on a file holding *unstashed* work discards it — and stash
   cannot get it back afterwards, it only prevents the loss.
-- ty type-checks `tests/` too: narrow `try_load_*` results with
+- mypy and ty both type-check `tests/`: narrow `try_load_*` results with
   `assert isinstance(loaded, tablib.Dataset)` before touching Dataset
   attributes (the existing tests' idiom).
 - Argparse unit tests: call `parse_command_line(argv)` directly and assert on the returned `args`.
