@@ -227,6 +227,14 @@ def test_load_csv_with_delimiter(tmp_path):
     assert ds.headers == ["name", "age"]
 
 
+def test_load_csv_with_quotechar(tmp_path):
+    p = tmp_path / "quoted.csv"
+    p.write_text("name,note\nAlice,'x, y'\n")
+    ds = load_dataset_file(p, extra_args={"quotechar": "'"})
+    assert len(ds) == 1
+    assert ds[0] == ("Alice", "x, y")
+
+
 def test_load_csv_no_extension(tmp_path):
     """CSV file without extension should be detected via text-mode fallback."""
     p = tmp_path / "data"
@@ -357,6 +365,20 @@ def test_export_dataset_wraps_tablib_failure():
     headerless.append(["Alice", 30])
     with pytest.raises(TublubError, match="Could not export"):
         export_dataset(headerless, "dbf", extra_args={}, file_handle=io.BytesIO())
+
+
+# --- csv save options ---
+
+
+def test_csv_save_options_reach_the_writer(sample_json, capsys):
+    """The unix dialect quotes everything, making all three options visible.
+
+    A JSON input keeps the load phase out of the picture — on a CSV input the
+    same options would also reshape the parse.
+    """
+    rc = cli(["--dialect", "unix", "-d", ";", "-q", "'", "-t", "csv", str(sample_json)])
+    assert rc == 0
+    assert capsys.readouterr().out.splitlines()[0] == "'name';'age';'city'"
 
 
 # --- parse_command_line ---
@@ -936,6 +958,18 @@ def test_skip_lines_single_sheet_still_loads(one_sheet_xlsx):
     loaded = try_load_file(one_sheet_xlsx, extra_args={"skip_lines": 1})
     assert isinstance(loaded, tablib.Dataset)
     assert len(loaded) == 1
+
+
+def test_no_xlsx_optimize_multi_sheet_still_loads(multi_sheet_xlsx):
+    """Unlike --skip-lines, read_only= is accepted on the book import path.
+
+    A well-formed workbook loads identically either way and filter_args drops
+    unknown keys silently, so this guards the tablib boundary: should tablib
+    ever drop read_only= from import_book, the TypeError would surface here.
+    """
+    loaded = try_load_file(multi_sheet_xlsx, extra_args={"read_only": False})
+    assert isinstance(loaded, tablib.Databook)
+    assert loaded.size == 2
 
 
 def test_skip_lines_csv_unaffected(sample_csv):
@@ -1960,6 +1994,35 @@ def test_positional_outfile_keeps_all_sheets(multi_sheet_xlsx, tmp_path):
     assert loaded.size == 2
 
 
+def test_ods_book_saves_and_loads_back(multi_sheet_xlsx, tmp_path, capsys):
+    """The manual's own example: tublub book.xlsx out.ods keeps both sheets."""
+    out_file = tmp_path / "out.ods"
+    rc = cli([str(multi_sheet_xlsx), str(out_file)], stderr_isatty=False)
+    assert rc == 0
+    assert f"Saved '{out_file}', 2 sheets (ods)" in capsys.readouterr().out
+    rc = cli(["-l", str(out_file)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "[0] people" in out
+    assert "[1] cities" in out
+
+
+@pytest.mark.parametrize("fmt", ["html", "rst"])
+def test_book_export_html_rst_keeps_all_sheets(fmt, multi_sheet_xlsx, capsys):
+    """Multi-sheet capability itself lives in the export library; the claim
+    guarded here is the manual's format list and that no first-sheet fallback
+    fires — its warning prints even with stderr redirected, so a silent err
+    proves the whole book was exported. rst omits sheet titles, so assert on
+    data from both sheets rather than titles.
+    """
+    rc = cli(["-t", fmt, str(multi_sheet_xlsx)], stderr_isatty=False)
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert captured.err == ""
+    assert "Alice" in captured.out
+    assert "Stockholm" in captured.out
+
+
 # fallback + unconditional data-loss warning
 
 
@@ -2206,6 +2269,23 @@ def test_multi_sheet_print_falls_back_too(multi_sheet_xlsx, capsys, monkeypatch)
     assert "|" in out
 
 
+def test_empty_sheet_prints_heading_only(tmp_path, capsys):
+    """A selected sheet whose body renders empty gets a bare heading."""
+    p = tmp_path / "book.json"
+    p.write_text(
+        json.dumps(
+            [
+                {"title": "blank", "data": []},
+                {"title": "full", "data": [{"name": "Alice"}]},
+            ]
+        )
+    )
+    rc = cli(["-s", "0,1", str(p)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "=== blank (0 rows) ===\n\n=== full (1 rows) ===" in out
+
+
 # --- output clobber guard ---
 
 
@@ -2342,6 +2422,30 @@ def test_outfile_missing_parent_exits_cleanly(sample_csv, tmp_path):
     with pytest.raises(SystemExit) as excinfo:
         cli([str(sample_csv), str(out_file)])
     assert str(excinfo.value) == f"Cannot open '{out_file}': No such file or directory"
+
+
+# --- exit codes ---
+
+
+def test_runtime_failure_exit_code(tmp_path):
+    """Runtime failures exit via sys.exit(message): Python prints a non-int
+    code to stderr and exits with status 1, so the message-string shape is
+    the manual's exit status 1 as seen in-process.
+    """
+    p = tmp_path / "data.xyz"
+    p.write_text("not a known format")
+    with pytest.raises(SystemExit) as excinfo:
+        cli([str(p)])
+    assert isinstance(excinfo.value.code, str)
+    assert "Unable to detect" in excinfo.value.code
+
+
+def test_usage_error_exit_code(sample_csv, capsys):
+    """A rejected command line exits 2, the manual's usage-error status."""
+    with pytest.raises(SystemExit) as excinfo:
+        cli(["--dialect", "bogus", str(sample_csv)])
+    assert excinfo.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
 
 
 # --- single-input sheet titling ---

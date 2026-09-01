@@ -102,6 +102,12 @@ CI and tooling-only changes (workflows, `Justfile`, type-checker config) are nei
 - `import_set()` on a book-shaped JSON/YAML (`[{title, data}, ...]`) silently
   yields a bogus two-column `title`/`data` Dataset — which is why the
   `try_load_*` handshake tries Databook first.
+- csv `import_set`/`export_stream_set` run `kwargs.setdefault("delimiter", ",")`
+  before `csv.reader`/`csv.writer`, and an explicit `delimiter=` overrides the
+  dialect's own — a `dialect=` kwarg can never change the delimiter, which
+  makes `--dialect` inert on csv *load* (quirks entry in `docs/TODO.md`).
+- `export_book` for rst omits sheet titles (html keeps them) — book-export
+  tests assert on sheet *data*, not titles.
 
 ## Ruff gotchas
 
@@ -138,7 +144,11 @@ CI and tooling-only changes (workflows, `Justfile`, type-checker config) are nei
   `git stash pop` to bring your work back. Don't revert the mutation with Edit —
   restore is exact and cannot leave a stray edit behind. `git checkout` /
   `git restore <file>` on a file holding *unstashed* work discards it — and stash
-  cannot get it back afterwards, it only prevents the loss.
+  cannot get it back afterwards, it only prevents the loss. The restore-not-Edit
+  rule assumes the mutated file is clean: before any `git restore <file>`, check
+  `git status --porcelain <file>` is empty — if the probe target itself holds
+  uncommitted work (e.g. a marker injected into tests/ that also carries new
+  tests), stash-bracket that file too, or revert the probe by Edit.
 - mypy and ty both type-check `tests/`: narrow `try_load_*` results with
   `assert isinstance(loaded, tablib.Dataset)` before touching Dataset
   attributes (the existing tests' idiom).
